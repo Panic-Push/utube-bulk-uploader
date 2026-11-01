@@ -8,4 +8,8 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="practice-studio.html" LogicalName="UTubeBulkUploader.Core.practice-studio.html" />
+  </ItemGroup>
+
 </Project>

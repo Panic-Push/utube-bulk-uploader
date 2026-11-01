@@ -48,6 +48,26 @@
                 </StackPanel>
             </Grid>
 
+            <TextBlock Text="Night mode" Style="{StaticResource SectionHeader}" />
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE916;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Pause between batches (minutes)" />
+                    <TextBlock Text="Night mode waits this long after Studio finishes a batch before starting the next." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <NumberBox Grid.Column="2" x:Name="Gap" Minimum="0" Maximum="60" SpinButtonPlacementMode="Inline" Width="130" ValueChanged="OnGapChanged" />
+            </Grid>
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE774;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Chrome" />
+                    <TextBlock x:Name="ChromeInfo" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                </StackPanel>
+                <Button Grid.Column="2" Content="Choose chrome.exe" Click="OnChooseChrome" />
+            </Grid>
+
             <TextBlock Text="Log file" Style="{StaticResource SectionHeader}" />
             <Grid Style="{StaticResource SettingRow}">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

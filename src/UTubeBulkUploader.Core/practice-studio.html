@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Practice Studio (UTube Bulk Uploader)</title>
+<style>
+  body { font-family: "Segoe UI", Roboto, sans-serif; margin: 0; background: #f9f9f9; color: #0f0f0f; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 24px; background: #fff; border-bottom: 1px solid #e5e5e5; }
+  header b { font-size: 20px; }
+  .note { margin-left: auto; background: #fff4ce; padding: 6px 12px; border-radius: 6px; font-size: 13px; }
+  #upload-icon { border: 1px solid #ccc; border-radius: 20px; background: #fff; padding: 8px 16px; cursor: pointer; }
+  main { padding: 32px; }
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; }
+  .backdrop.open { display: flex; }
+</style>
+</head>
+<body>
+<header>
+  <b>Practice Studio</b>
+  <button id="upload-icon" aria-label="Upload videos">⬆ Upload</button>
+  <span class="note">A copy for testing night mode. Nothing is sent anywhere.</span>
+</header>
+<main><h1>Channel dashboard</h1><p>Practice page. Uploads here are simulated.</p></main>
+<div class="backdrop" id="backdrop"><ytcp-uploads-dialog id="dialog"></ytcp-uploads-dialog></div>
+<script>
+  // Options: ?speed=seconds-per-file  &limit=files-allowed-today (stored in localStorage)
+  const q = new URLSearchParams(location.search);
+  const speed = Number(q.get('speed') || 3);
+  const limit = q.get('limit') ? Number(q.get('limit')) : null;
+  const usedKey = 'ubu-practice-used';
+
+  class UploadsDialog extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `
+        <style>
+          .box { background: #fff; width: 640px; border-radius: 12px; padding: 24px; font-family: inherit; }
+          .drop { border: 2px dashed #ccc; border-radius: 12px; padding: 48px; text-align: center; }
+          .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 14px; }
+          h2 { margin-top: 0; }
+        </style>
+        <div class="box">
+          <h2 id="head">Upload videos</h2>
+          <div class="drop" id="drop">Drag and drop video files to upload<br><br>
+            <input type="file" name="Filedata" multiple id="picker"></div>
+          <div id="rows"></div>
+        </div>`;
+      root.getElementById('picker').addEventListener('change', e => this.start([...e.target.files]));
+    }
+    start(files) {
+      const root = this.shadowRoot;
+      if (!files.length) return;
+      root.getElementById('drop').style.display = 'none';
+      const head = root.getElementById('head');
+      const used = Number(localStorage.getItem(usedKey) || 0);
+      if (limit !== null && used + files.length > limit) {
+        head.textContent = 'Daily upload limit reached';
+        root.getElementById('rows').textContent = 'You can upload more videos in 24 hours.';
+        return;
+      }
+      localStorage.setItem(usedKey, used + files.length);
+      head.textContent = `Uploading ${files.length} videos`;
+      const rows = root.getElementById('rows');
+      let finished = 0;
+      files.forEach((f, i) => {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = `<span>${f.name.replace(/\.[^.]+$/, '')}</span><span class="st">Waiting to upload</span>`;
+        rows.appendChild(row);
+        const st = row.querySelector('.st');
+        let pct = 0;
+        setTimeout(() => {
+          const t = setInterval(() => {
+            pct = Math.min(100, pct + 20);
+            st.textContent = pct < 100 ? `Uploading ${pct}%` : 'Upload complete';
+            if (pct >= 100) {
+              clearInterval(t);
+              if (++finished === files.length) head.textContent = 'Uploads complete';
+            }
+          }, speed * 200);
+        }, i * 300);
+      });
+    }
+  }
+  customElements.define('ytcp-uploads-dialog', UploadsDialog);
+  const open = () => document.getElementById('backdrop').classList.add('open');
+  document.getElementById('upload-icon').addEventListener('click', open);
+  if (q.get('d') === 'ud') open();
+</script>
+</body>
+</html>

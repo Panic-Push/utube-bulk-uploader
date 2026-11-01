@@ -1,0 +1,224 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using UTubeBulkUploader.Core;
+using UTubeBulkUploader.Helpers;
+using UTubeBulkUploader.Services;
+
+namespace UTubeBulkUploader.Views;
+
+public sealed partial class NightPage : Page, IActivatable
+{
+    private readonly AppHost _host = AppHost.Current;
+    private readonly ObservableCollection<string> _activity = new();
+    private readonly DispatcherTimer _countdown = new() { Interval = TimeSpan.FromSeconds(1) };
+    private CancellationTokenSource? _cts;
+    private DateTime? _nextAt;
+    private string? _screenshot;
+    private bool _loading = true;
+
+    public bool Running => _cts is not null;
+
+    public NightPage()
+    {
+        InitializeComponent();
+        Activity.ItemsSource = _activity;
+        TargetChoice.SelectedIndex = _host.Settings.NightTarget == "real" ? 1 : 0;
+        _loading = false;
+        _countdown.Tick += (_, _) => UpdateCountdown();
+        _host.LogChanged += () => { if (!Running) RefreshSummary(); };
+        RefreshSummary();
+        RefreshChrome();
+    }
+
+    public void OnActivated()
+    {
+        if (!Running) RefreshSummary();
+        RefreshChrome();
+    }
+
+    private bool Real => (TargetChoice.SelectedItem as RadioButton)?.Tag as string == "real";
+
+    private void OnTargetChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading) return;
+        _host.SaveSettings(s => s.NightTarget = Real ? "real" : "practice");
+    }
+
+    private void RefreshSummary()
+    {
+        var batches = BatchPlanner.Plan(_host.LogFile, _host.Settings.BatchSize, out _);
+        var clips = batches.Sum(b => b.Rows.Count);
+        Summary.Text = clips == 0 ? "Nothing waiting: rename clips first."
+            : $"{Format.Count(clips, "clip")} waiting in {Format.Count(batches.Count, "batch", "batches")} · {_host.Settings.NightGapMinutes} min pause between batches";
+        StartButton.IsEnabled = !Running && clips > 0;
+    }
+
+    private void RefreshChrome()
+    {
+        var chrome = ChromeLauncher.FindChrome(_host.Settings.ChromePath);
+        var open = ChromeLauncher.RunningPort(ChromeLauncher.ProfileDir) is not null;
+        ChromeInfo.Text = chrome is null
+            ? "Google Chrome wasn't found. Install Chrome, or set its location in Settings."
+            : open ? "Open. Make sure it's signed in to the channel's Google account (check the top right of YouTube Studio)."
+                   : "Uses its own Chrome profile, separate from your everyday Chrome. Open it once and sign in to the channel's Google account; it stays signed in.";
+        OpenChromeButton.IsEnabled = chrome is not null;
+    }
+
+    private async void OnOpenChrome(object sender, RoutedEventArgs e)
+    {
+        var chrome = ChromeLauncher.FindChrome(_host.Settings.ChromePath);
+        if (chrome is null) return;
+        try
+        {
+            if (ChromeLauncher.RunningPort(ChromeLauncher.ProfileDir) is int port)
+            {
+                await using var tab = await CdpTab.ConnectAsync(port, CancellationToken.None);
+                await tab.SendAsync("Page.bringToFront");
+            }
+            else await ChromeLauncher.EnsureRunningAsync(chrome, ChromeLauncher.ProfileDir, StudioTarget.Real.HomeUrl, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            await Ui.Inform(XamlRoot, "Couldn't open Chrome", ex.Message);
+        }
+        RefreshChrome();
+    }
+
+    private void Add(string line) => _host.Ui(() =>
+    {
+        _activity.Insert(0, $"{DateTime.Now:HH:mm}  {line}");
+        while (_activity.Count > 300) _activity.RemoveAt(_activity.Count - 1);
+        Log.Info("Night mode: " + line);
+    });
+
+    private async void OnStart(object sender, RoutedEventArgs e)
+    {
+        var chrome = ChromeLauncher.FindChrome(_host.Settings.ChromePath);
+        if (chrome is null)
+        {
+            await Ui.Inform(XamlRoot, "Chrome not found", "Install Google Chrome, or set its location in Settings.");
+            return;
+        }
+        var real = Real;
+        if (real && !await Ui.Confirm(XamlRoot, "Start real uploads?",
+                "Night mode will upload the waiting batches to the YouTube channel signed in to its Chrome window, " +
+                $"with a {_host.Settings.NightGapMinutes}-minute pause between batches, until everything is done or Studio says stop.\n\n" +
+                "Don't use that Chrome window while it runs. Keep this PC awake and connected.", "Start")) return;
+
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        _screenshot = null;
+        ResultBar.IsOpen = false;
+        StartButton.IsEnabled = false;
+        StopButton.IsEnabled = true;
+        TargetChoice.IsEnabled = false;
+        StatusTitle.Text = "Starting";
+        StatusDetail.Text = "";
+        Bar.Value = 0;
+        KeepAwake(true);
+        Add(real ? "Night mode started (YouTube Studio)." : "Night mode started (practice page).");
+
+        BatchResult result;
+        try
+        {
+            var target = real ? StudioTarget.Real : StudioTarget.PracticePage("speed=2");
+            var port = await ChromeLauncher.EnsureRunningAsync(chrome, ChromeLauncher.ProfileDir, target.HomeUrl, ct);
+            await using var tab = await CdpTab.ConnectAsync(port, ct);
+            await tab.SendAsync("Page.bringToFront", ct: ct);
+            var driver = new StudioDriver(tab, target);
+            await driver.InitAsync(ct);
+            var gap = real ? TimeSpan.FromMinutes(_host.Settings.NightGapMinutes) : TimeSpan.FromSeconds(10);
+            var runner = new NightRunner { Gap = gap };
+            runner.Activity += Add;
+            runner.Progress += p => _host.Ui(() => ShowProgress(p));
+            result = await Task.Run(() => runner.RunAsync(driver, _host.LogFile, _host.Settings.BatchSize, practice: !real, ct), CancellationToken.None);
+        }
+        catch (OperationCanceledException) { result = new BatchResult(BatchOutcome.Stopped, "Stopped."); }
+        catch (Exception ex)
+        {
+            Log.Error("Night mode failed", ex);
+            result = new BatchResult(BatchOutcome.Error, ex.Message);
+        }
+
+        KeepAwake(false);
+        _cts.Dispose();
+        _cts = null;
+        _nextAt = null;
+        _countdown.Stop();
+        StopButton.IsEnabled = false;
+        TargetChoice.IsEnabled = true;
+        if (real) _host.NotifyLogChanged();
+        ShowResult(result);
+        RefreshSummary();
+        RefreshChrome();
+    }
+
+    private void OnStop(object sender, RoutedEventArgs e)
+    {
+        StopButton.IsEnabled = false;
+        StatusTitle.Text = "Stopping…";
+        Add("Stop requested. The batch Studio is already uploading carries on in Chrome; it won't be marked uploaded here.");
+        _cts?.Cancel();
+    }
+
+    private void ShowProgress(NightProgress p)
+    {
+        StatusTitle.Text = $"Batch {p.BatchNumber} of {p.BatchCount}";
+        StatusDetail.Text = p.Status;
+        Bar.Maximum = Math.Max(1, p.ClipsTotal);
+        Bar.Value = p.ClipsDone;
+        Counts.Text = $"{p.ClipsDone} of {Format.Count(p.ClipsTotal, "clip")} done";
+        _nextAt = p.NextBatchAt;
+        if (_nextAt is not null) { _countdown.Start(); UpdateCountdown(); }
+        else _countdown.Stop();
+    }
+
+    private void UpdateCountdown()
+    {
+        if (_nextAt is not { } at) return;
+        var left = at - DateTime.Now;
+        StatusDetail.Text = left > TimeSpan.Zero ? $"Pausing. Next batch in {(int)left.TotalMinutes}:{left.Seconds:00}" : "Starting the next batch";
+    }
+
+    private void ShowResult(BatchResult r)
+    {
+        _screenshot = r.ScreenshotPath;
+        (ResultBar.Severity, ResultBar.Title, StatusTitle.Text) = r.Outcome switch
+        {
+            BatchOutcome.Done => (InfoBarSeverity.Success, "Finished", "Finished"),
+            BatchOutcome.StudioLimit => (InfoBarSeverity.Warning, "Studio said stop", "Stopped: Studio's limit"),
+            BatchOutcome.SignedOut => (InfoBarSeverity.Error, "Sign-in needed", "Stopped: signed out"),
+            BatchOutcome.TimedOut => (InfoBarSeverity.Warning, "Batch took too long", "Stopped: batch too slow"),
+            BatchOutcome.Stopped => (InfoBarSeverity.Informational, "Stopped", "Stopped"),
+            _ => (InfoBarSeverity.Error, "Night mode stopped", "Stopped: something unexpected"),
+        };
+        var extra = r.Outcome is BatchOutcome.StudioLimit or BatchOutcome.TimedOut or BatchOutcome.Error
+            ? " The batch that was running is not marked uploaded; check it in YouTube Studio > Content."
+            : "";
+        ResultBar.Message = r.Message + extra;
+        ScreenshotButton.Visibility = Ui.Show(_screenshot is not null);
+        ResultBar.IsOpen = true;
+        StatusDetail.Text = "";
+        Add(r.Message);
+    }
+
+    private void OnOpenScreenshot(object sender, RoutedEventArgs e)
+    {
+        if (_screenshot is null) return;
+        try { Process.Start(new ProcessStartInfo(_screenshot) { UseShellExecute = true }); }
+        catch (Exception ex) { Log.Warn($"Couldn't open screenshot: {ex.Message}"); }
+    }
+
+    // Keep the PC from sleeping while night mode runs.
+    [DllImport("kernel32.dll")]
+    private static extern uint SetThreadExecutionState(uint flags);
+
+    private static void KeepAwake(bool on)
+    {
+        const uint continuous = 0x80000000, system = 0x00000001;
+        try { SetThreadExecutionState(on ? continuous | system : continuous); } catch (Exception) { }
+    }
+}

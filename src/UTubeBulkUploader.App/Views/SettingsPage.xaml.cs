@@ -30,6 +30,9 @@ public sealed partial class SettingsPage : Page, IActivatable
         LogInfo.Text = s.EffectiveLogPath + (string.IsNullOrWhiteSpace(s.LogFilePath) ? " (Desktop)" : "");
         LogDefault.Visibility = Ui.Show(!string.IsNullOrWhiteSpace(s.LogFilePath));
         Theme.SelectedItem = Theme.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == s.Theme) ?? Theme.Items[0];
+        Gap.Value = s.NightGapMinutes;
+        var chrome = ChromeLauncher.FindChrome(s.ChromePath);
+        ChromeInfo.Text = chrome is null ? "Not found. Install Google Chrome, or choose chrome.exe." : chrome;
         var v = typeof(App).Assembly.GetName().Version;
         VersionInfo.Text = $"Version {v?.ToString(3)} · Renames and batches news footage for YouTube Studio";
         _loading = false;
@@ -39,6 +42,23 @@ public sealed partial class SettingsPage : Page, IActivatable
     {
         if (_loading) return;
         _host.SaveSettings(s => s.ConfirmBeforeRename = Confirm.IsOn);
+    }
+
+    private void OnGapChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loading || double.IsNaN(Gap.Value)) return;
+        _host.SaveSettings(s => s.NightGapMinutes = (int)Math.Clamp(Gap.Value, 0, 60));
+    }
+
+    private async void OnChooseChrome(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.Hwnd);
+        picker.FileTypeFilter.Add(".exe");
+        var file = await picker.PickSingleFileAsync();
+        if (file is null) return;
+        _host.SaveSettings(s => s.ChromePath = file.Path);
+        Load();
     }
 
     private void OnTheme(object sender, SelectionChangedEventArgs e)

@@ -44,6 +44,10 @@ public sealed class AppSettings
     public string NightStartTime { get; set; } = "23:00";
     public bool NightAutoStart { get; set; }
     public string? ChromePath { get; set; }
+    /// <summary>Pause between batches in night mode.</summary>
+    public int NightGapMinutes { get; set; } = 2;
+    /// <summary>"practice" or "real".</summary>
+    public string NightTarget { get; set; } = "practice";
 
     public string EffectiveLogPath => string.IsNullOrWhiteSpace(LogFilePath) ? AppPaths.DefaultLogPath : LogFilePath!;
 
@@ -71,6 +75,7 @@ public sealed class AppSettings
     {
         BatchSize = Math.Clamp(BatchSize, 1, 15);
         NightlyUploadLimit = Math.Max(1, NightlyUploadLimit);
+        NightGapMinutes = Math.Clamp(NightGapMinutes, 0, 60);
         var tmp = FilePath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(this, JsonOptions));
         File.Move(tmp, FilePath, overwrite: true);

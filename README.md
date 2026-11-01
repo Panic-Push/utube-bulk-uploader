@@ -44,8 +44,24 @@ Every push builds the app on a clean Windows machine, runs the tests, builds the
 
 ## Roadmap
 
-1. Rename (Home, Preview, rename, undo, log) — **this version**
-2. Batches and manual drag into YouTube Studio
-3. Night mode on a test page
-4. Night mode on real YouTube Studio
+1. Rename (Home, Preview, rename, undo, log) — done, tested on a real PC
+2. Batches (up to 15 clips, in rename order; drag a card into Studio or let night mode do it) — **this version**
+3. Night mode on a practice page — **this version**
+4. Night mode on real YouTube Studio — **this version, first real test pending**
 5. Second PC check
+
+## Night mode
+
+Night mode opens YouTube Studio in its own Chrome window (a separate Chrome profile; your everyday Chrome is untouched),
+opens the upload box, hands it one batch, waits until Studio has finished uploading every file, marks the batch as
+uploaded in the log, pauses (2 minutes by default, Settings), and starts the next batch.
+
+It stops by itself and says why, with a screenshot, when Studio shows a limit message, when Chrome is signed out,
+when a batch takes over 25 minutes, or when the page isn't what it expects.
+
+First time: Night mode → **Open Chrome** → sign in to the channel's Google account in that window. Try **Practice page**
+first (nothing is uploaded), then a small real batch.
+
+Titles on YouTube come from the file names; YouTube removes punctuation from them (so `Test - Kovil - 1 (30.10.26)`
+becomes `Test   Kovil   1 30 10 26`). Night mode drives YouTube Studio's website, which YouTube's terms don't
+officially allow for automated tools; use it knowing the channel carries that risk.

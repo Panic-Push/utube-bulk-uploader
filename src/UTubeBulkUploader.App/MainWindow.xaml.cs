@@ -63,10 +63,8 @@ public sealed partial class MainWindow : Window
             page = tag switch
             {
                 "preview" => new PreviewPage(),
-                "batches" => new ComingSoonPage("Batches", "",
-                    "Next update: renamed clips grouped into batches of up to 15, ready to drag into YouTube Studio."),
-                "night" => new ComingSoonPage("Night mode", "",
-                    "A later update: uploads batches to YouTube Studio overnight, up to your nightly limit."),
+                "batches" => new BatchesPage(),
+                "night" => new NightPage(),
                 "log" => new LogPage(),
                 "settings" => new SettingsPage(),
                 _ => new HomePage(),
