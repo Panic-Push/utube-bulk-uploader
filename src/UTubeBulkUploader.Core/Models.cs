@@ -16,11 +16,11 @@ public enum ClipState
 /// <summary>One video file on disk.</summary>
 public sealed class Clip
 {
-    public required string FullPath { get; set; }
-    public required long Size { get; init; }
+    public string FullPath { get; set; } = "";
+    public long Size { get; init; }
     /// <summary>Recording time from metadata, else the file's modified time.</summary>
-    public required DateTime RecordingTime { get; init; }
-    public required bool RecordingTimeFromMetadata { get; init; }
+    public DateTime RecordingTime { get; init; }
+    public bool RecordingTimeFromMetadata { get; init; }
     public string Fingerprint { get; set; } = "";
     public ClipState State { get; set; } = ClipState.Pending;
     public string? StateNote { get; set; }
@@ -48,9 +48,9 @@ public sealed class Clip
 /// <summary>A folder in the story tree. The root folder is the story.</summary>
 public sealed class FolderNode
 {
-    public required string FullPath { get; init; }
+    public string FullPath { get; init; } = "";
     /// <summary>Name used in titles. Starts as the folder name; the user can edit it.</summary>
-    public required string DisplayName { get; set; }
+    public string DisplayName { get; set; } = "";
     public FolderNode? Parent { get; init; }
     public List<FolderNode> Children { get; } = new();
     /// <summary>Clips directly inside this folder, kept sorted by <see cref="Clip.Order"/>.</summary>
