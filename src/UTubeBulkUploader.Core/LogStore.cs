@@ -8,6 +8,8 @@ public static class LogStatus
 {
     public const string Renamed = "Renamed";
     public const string Uploaded = "Uploaded";
+    /// <summary>Saved on YouTube by night mode; the file is still uploading.</summary>
+    public const string Uploading = "Uploading";
     public const string Failed = "Failed";
     public const string Undone = "Undone";
     public static string InBatch(int n) => $"In batch {n}";

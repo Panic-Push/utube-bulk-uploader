@@ -15,6 +15,8 @@ public sealed partial class NightPage : Page, IActivatable
     private readonly ObservableCollection<string> _activity = new();
     private readonly DispatcherTimer _countdown = new() { Interval = TimeSpan.FromSeconds(1) };
     private CancellationTokenSource? _cts;
+    private NightRunner? _runner;
+    private bool _finishing;
     private DateTime? _nextAt;
     private string? _screenshot;
     private bool _loading = true;
@@ -44,7 +46,7 @@ public sealed partial class NightPage : Page, IActivatable
         var batches = BatchPlanner.Plan(_host.LogFile, _host.Settings.BatchSize, out _);
         var clips = batches.Sum(b => b.Rows.Count);
         Summary.Text = clips == 0 ? "Nothing waiting: rename clips first."
-            : $"{Format.Count(clips, "clip")} waiting in {Format.Count(batches.Count, "batch", "batches")} · {_host.Settings.NightGapMinutes} min pause between batches";
+            : $"{Format.Count(clips, "clip")} waiting · one video every {_host.Settings.SecondsPerVideo} s, up to 3 uploading at once";
         StartButton.IsEnabled = !Running && clips > 0;
         StatToday.Text = BatchPlanner.UploadedToday(_host.LogFile).ToString();
         StatLeft.Text = clips.ToString();
@@ -106,12 +108,15 @@ public sealed partial class NightPage : Page, IActivatable
             return;
         }
         if (!await Ui.Confirm(XamlRoot, "Start real uploads?",
-                "Night mode will upload the waiting batches to the YouTube channel signed in to its Chrome window, " +
-                $"with a {_host.Settings.NightGapMinutes}-minute pause between batches, until everything is done or Studio says stop.\n\n" +
+                "Night mode will upload the waiting clips one by one to the YouTube channel signed in to its Chrome window: " +
+                "title from the file name, description with the file name and today's date, not made for kids, Private. " +
+                $"A new video every {_host.Settings.SecondsPerVideo} seconds, up to 3 uploading at once, until everything is done or Studio says stop.\n\n" +
                 "Don't use that Chrome window while it runs. Keep this PC awake and connected.", "Start")) return;
 
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
+        _finishing = false;
+        StopLabel.Text = "Stop";
         _screenshot = null;
         ResultBar.IsOpen = false;
         StartButton.IsEnabled = false;
@@ -135,11 +140,11 @@ public sealed partial class NightPage : Page, IActivatable
             await tab.SendAsync("Page.bringToFront", ct: ct);
             var driver = new StudioDriver(tab, target);
             await driver.InitAsync(ct);
-            var gap = TimeSpan.FromMinutes(_host.Settings.NightGapMinutes);
-            var runner = new NightRunner { Gap = gap };
+            var runner = new NightRunner { PerVideo = TimeSpan.FromSeconds(_host.Settings.SecondsPerVideo) };
+            _runner = runner;
             runner.Activity += Add;
             runner.Progress += p => _host.Ui(() => ShowProgress(p));
-            result = await Task.Run(() => runner.RunAsync(driver, _host.LogFile, _host.Settings.BatchSize, ct), CancellationToken.None);
+            result = await Task.Run(() => runner.RunAsync(driver, _host.LogFile, ct), CancellationToken.None);
         }
         catch (OperationCanceledException) { result = new BatchResult(BatchOutcome.Stopped, "Stopped."); }
         catch (Exception ex)
@@ -151,6 +156,9 @@ public sealed partial class NightPage : Page, IActivatable
         KeepAwake(false);
         _cts.Dispose();
         _cts = null;
+        _runner = null;
+        _finishing = false;
+        StopLabel.Text = "Stop";
         _nextAt = null;
         _countdown.Stop();
         StopButton.IsEnabled = false;
@@ -162,23 +170,34 @@ public sealed partial class NightPage : Page, IActivatable
 
     private void OnStop(object sender, RoutedEventArgs e)
     {
+        if (!_finishing && _runner is not null)
+        {
+            // First press: no new videos; let the ones uploading finish so they aren't left broken.
+            _finishing = true;
+            _runner.FinishAndStop();
+            StopLabel.Text = "Stop now";
+            StatusTitle.Text = "Finishing uploads in progress…";
+            Add("Stop requested: no new videos. Waiting for the uploads in progress to finish. Press Stop now to stop at once.");
+            return;
+        }
         StopButton.IsEnabled = false;
         StatusTitle.Text = "Stopping…";
-        Add("Stop requested. The batch Studio is already uploading carries on in Chrome; it won't be marked uploaded here.");
+        Add("Stopping now. Videos still uploading keep going in Chrome if it stays open; they're checked next run.");
         _cts?.Cancel();
     }
 
     private void ShowProgress(NightProgress p)
     {
-        StatusTitle.Text = $"Batch {p.BatchNumber} of {p.BatchCount}";
+        if (!_finishing) StatusTitle.Text = p.Uploading == 0 ? "Working" : $"{p.Uploading} uploading";
         StatusDetail.Text = p.Status;
-        Bar.Maximum = Math.Max(1, p.ClipsTotal);
+        var total = Math.Max(1, p.Uploaded + p.Failed + p.Uploading + p.Waiting);
+        Bar.Maximum = total;
         Bar.Value = p.Uploaded + p.Failed;
         StatRun.Text = p.Uploaded.ToString();
         StatFailed.Text = p.Failed.ToString();
         StatToday.Text = (_startToday + p.Uploaded).ToString();
-        StatLeft.Text = Math.Max(0, p.ClipsTotal - p.Uploaded - p.Failed).ToString();
-        _nextAt = p.NextBatchAt;
+        StatLeft.Text = p.Waiting.ToString();
+        _nextAt = p.NextVideoAt;
         if (_nextAt is not null) { _countdown.Start(); UpdateCountdown(); }
         else _countdown.Stop();
     }
@@ -187,7 +206,7 @@ public sealed partial class NightPage : Page, IActivatable
     {
         if (_nextAt is not { } at) return;
         var left = at - DateTime.Now;
-        StatusDetail.Text = left > TimeSpan.Zero ? $"Pausing. Next batch in {(int)left.TotalMinutes}:{left.Seconds:00}" : "Starting the next batch";
+        StatusDetail.Text = left > TimeSpan.Zero ? $"Next video in {(int)left.TotalSeconds} s" : "Starting the next video";
     }
 
     private void ShowResult(BatchResult r)
@@ -198,12 +217,12 @@ public sealed partial class NightPage : Page, IActivatable
             BatchOutcome.Done => (InfoBarSeverity.Success, "Finished", "Finished"),
             BatchOutcome.StudioLimit => (InfoBarSeverity.Warning, "Studio said stop", "Stopped: Studio's limit"),
             BatchOutcome.SignedOut => (InfoBarSeverity.Error, "Sign-in needed", "Stopped: signed out"),
-            BatchOutcome.TimedOut => (InfoBarSeverity.Warning, "Batch took too long", "Stopped: batch too slow"),
+            BatchOutcome.TimedOut => (InfoBarSeverity.Warning, "An upload took too long", "Stopped: upload too slow"),
             BatchOutcome.Stopped => (InfoBarSeverity.Informational, "Stopped", "Stopped"),
             _ => (InfoBarSeverity.Error, "Night mode stopped", "Stopped: something unexpected"),
         };
         var extra = r.Outcome is BatchOutcome.StudioLimit or BatchOutcome.TimedOut or BatchOutcome.Error
-            ? " Files Studio had already ticked are marked uploaded; the rest of that batch will be tried again next run."
+            ? " Videos that finished are marked uploaded in the log; the rest are tried again next run."
             : "";
         ResultBar.Message = r.Message + extra;
         ScreenshotButton.Visibility = Ui.Show(_screenshot is not null);

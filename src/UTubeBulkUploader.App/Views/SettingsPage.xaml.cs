@@ -30,7 +30,7 @@ public sealed partial class SettingsPage : Page, IActivatable
         LogInfo.Text = s.EffectiveLogPath + (string.IsNullOrWhiteSpace(s.LogFilePath) ? " (Desktop)" : "");
         LogDefault.Visibility = Ui.Show(!string.IsNullOrWhiteSpace(s.LogFilePath));
         Theme.SelectedItem = Theme.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == s.Theme) ?? Theme.Items[0];
-        Gap.Value = s.NightGapMinutes;
+        Gap.Value = s.SecondsPerVideo;
         var chrome = ChromeLauncher.FindChrome(s.ChromePath);
         ChromeInfo.Text = chrome is null ? "Not found. Install Google Chrome, or choose chrome.exe." : chrome;
         var v = typeof(App).Assembly.GetName().Version;
@@ -47,7 +47,7 @@ public sealed partial class SettingsPage : Page, IActivatable
     private void OnGapChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         if (_loading || double.IsNaN(Gap.Value)) return;
-        _host.SaveSettings(s => s.NightGapMinutes = (int)Math.Clamp(Gap.Value, 0, 60));
+        _host.SaveSettings(s => s.SecondsPerVideo = (int)Math.Clamp(Gap.Value, 20, 600));
     }
 
     private async void OnChooseChrome(object sender, RoutedEventArgs e)

@@ -53,10 +53,10 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <FontIcon Glyph="&#xE916;" FontSize="18" />
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="Pause between batches (minutes)" />
-                    <TextBlock Text="Night mode waits this long after Studio finishes a batch before starting the next." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock Text="Seconds per video" />
+                    <TextBlock Text="Night mode starts a new video at most this often (45 by default). Files keep uploading in the background, up to 3 at a time." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
-                <NumberBox Grid.Column="2" x:Name="Gap" Minimum="0" Maximum="60" SpinButtonPlacementMode="Inline" Width="130" ValueChanged="OnGapChanged" />
+                <NumberBox Grid.Column="2" x:Name="Gap" Minimum="20" Maximum="600" SpinButtonPlacementMode="Inline" Width="130" ValueChanged="OnGapChanged" />
             </Grid>
             <Grid Style="{StaticResource SettingRow}">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

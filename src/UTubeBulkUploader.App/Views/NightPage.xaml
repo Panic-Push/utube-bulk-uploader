@@ -13,7 +13,7 @@
             </StackPanel>
 
             <InfoBar IsOpen="True" IsClosable="True" Severity="Informational"
-                     Message="Night mode opens YouTube Studio in its own Chrome window and uploads one batch at a time. A batch counts as done when Studio's upload box says Uploads complete with a 100% uploaded tick for every file; processing isn't waited for. It stops by itself when Studio says to stop, when it's signed out, when a batch takes over 20 minutes, or when anything looks unexpected." />
+                     Message="Night mode opens YouTube Studio in its own Chrome window and uploads the waiting clips one by one, like a person would: Create, Upload videos, title (the file name), description (file name and upload date), not made for kids, Private, Save. A new video starts every 45 seconds while earlier files keep uploading in the background, up to 3 at a time. A clip is marked uploaded only when Studio shows it 100% uploaded. It stops by itself when Studio says to stop, when it's signed out, or when anything looks unexpected." />
 
             <!-- Chrome -->
             <Border Style="{StaticResource CardStyle}">
@@ -51,7 +51,7 @@
                             <Button x:Name="StopButton" Click="OnStop" IsEnabled="False">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon Glyph="&#xE71A;" FontSize="14" />
-                                    <TextBlock Text="Stop" />
+                                    <TextBlock x:Name="StopLabel" Text="Stop" />
                                 </StackPanel>
                             </Button>
                         </StackPanel>

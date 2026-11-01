@@ -7,34 +7,47 @@
   body { font-family: "Segoe UI", Roboto, sans-serif; margin: 0; background: #f9f9f9; color: #0f0f0f; }
   header { display: flex; align-items: center; gap: 12px; padding: 12px 24px; background: #fff; border-bottom: 1px solid #e5e5e5; }
   header b { font-size: 20px; }
-  .note { margin-left: auto; background: #fff4ce; padding: 6px 12px; border-radius: 6px; font-size: 13px; }
-  #upload-icon { border: 1px solid #ccc; border-radius: 20px; background: #fff; padding: 8px 16px; cursor: pointer; }
+  .note { background: #fff4ce; padding: 6px 12px; border-radius: 6px; font-size: 13px; }
+  #create-icon { margin-left: auto; border: 1px solid #ccc; border-radius: 20px; background: #fff; padding: 8px 16px; cursor: pointer; }
+  #menu { position: absolute; right: 24px; top: 56px; background: #fff; border: 1px solid #ddd; border-radius: 8px; display: none; }
+  #menu.open { display: block; }
+  #menu tp-yt-paper-item { display: block; padding: 10px 20px; cursor: pointer; }
   main { padding: 32px; }
   .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; }
   .backdrop.open { display: flex; }
+  #notice { position: fixed; inset: 0; background: rgba(0,0,0,.3); display: none; align-items: center; justify-content: center; }
+  #notice.open { display: flex; }
+  #notice div { background: #fff; padding: 24px; border-radius: 12px; }
 </style>
 </head>
 <body>
 <header>
   <b>Test Studio</b>
-  <button id="upload-icon" aria-label="Upload videos">⬆ Upload</button>
   <span class="note">Used by the app's automated tests. Nothing is sent anywhere.</span>
+  <ytcp-button id="create-icon" role="button">Create</ytcp-button>
 </header>
-<main><h1>Channel dashboard</h1><p>Test page. Uploads here are simulated.</p></main>
+<div id="menu"><tp-yt-paper-item id="text-item-0" role="menuitem">Upload videos</tp-yt-paper-item><tp-yt-paper-item role="menuitem">Go live</tp-yt-paper-item></div>
+<main><h1>Channel content</h1><p>Test page. Uploads here are simulated.</p></main>
 <div class="backdrop" id="backdrop"><ytcp-uploads-dialog id="dialog"></ytcp-uploads-dialog></div>
+<div id="notice"><div><p>Video still uploading. Keep this page open until it's done.</p><ytcp-button id="close-button" role="button">Close</ytcp-button></div></div>
 <ytcp-multi-progress-monitor id="monitor"></ytcp-multi-progress-monitor>
 <script>
-  // Mirrors YouTube Studio's upload flow: the "Upload videos" box takes the files, closes, and a progress box
-  // in the corner lists every file ("Uploading 40%" ... "100% uploaded" with a tick) under a heading that
-  // ends as "Uploads complete".
-  // Options: ?speed=seconds-per-file  &limit=files-allowed-today (stored in localStorage)
-  //          &fail=N (the Nth file fails)  &stuck=1 (the heading never says complete)
+  // Mirrors YouTube Studio's one-video flow: Create → Upload videos → pick a file → Details (title, description,
+  // made for kids) → Next ×3 → Visibility (Private) → Save. The file keeps uploading in the corner box
+  // ("Uploading 40% ..." → "100% uploaded") after Save; reloading the page loses uploads in progress.
+  // Options: ?speed=seconds-per-file  &limit=files-allowed-today  &fail=N (the Nth file's upload fails)
+  //          &stuck=1 (uploads never finish)
   const q = new URLSearchParams(location.search);
   const speed = Number(q.get('speed') || 3);
   const limit = q.get('limit') ? Number(q.get('limit')) : null;
   const failAt = q.get('fail') ? Number(q.get('fail')) : null;
   const stuck = q.get('stuck') === '1';
-  const usedKey = 'ubu-practice-used';
+  const store = {
+    get: (k, d) => { try { return JSON.parse(localStorage.getItem('ubu-' + k)) ?? d; } catch { return d; } },
+    set: (k, v) => localStorage.setItem('ubu-' + k, JSON.stringify(v)),
+  };
+  store.set('loads', store.get('loads', 0) + 1);
+  let active = 0;
 
   class ProgressMonitor extends HTMLElement {
     connectedCallback() {
@@ -44,52 +57,26 @@
           .panel { position: fixed; right: 24px; bottom: 24px; width: 560px; background: #fff; border-radius: 12px;
                    box-shadow: 0 4px 24px rgba(0,0,0,.2); display: none; font-size: 15px; }
           .panel.open { display: block; }
-          .head { display: flex; align-items: center; padding: 16px 20px; font-size: 18px; font-weight: 600; }
-          .head span { flex: 1; }
+          .head { padding: 16px 20px; font-size: 18px; font-weight: 600; }
           .row { display: flex; align-items: center; gap: 12px; padding: 12px 20px; }
           .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; }
-          .tick { color: #2ba640; width: 20px; }
         </style>
-        <div class="panel" id="panel">
-          <div class="head"><span id="head"></span><button aria-label="Close" id="close">✕</button></div>
-          <div id="rows"></div>
-        </div>`;
-      root.getElementById('close').addEventListener('click', () => root.getElementById('panel').classList.remove('open'));
+        <div class="panel" id="panel"><div class="head" id="head"></div><div id="rows"></div></div>`;
     }
-    start(files) {
+    add(title) {
       const root = this.shadowRoot;
-      const panel = root.getElementById('panel');
-      const head = root.getElementById('head');
-      const rows = root.getElementById('rows');
-      panel.classList.add('open');
-      head.textContent = `Uploading ${files.length} videos`;
-      let finished = 0;
-      files.forEach((f, i) => {
-        const row = document.createElement('div');
-        row.className = 'row';
-        row.innerHTML = `<span class="title"></span><span class="st">Waiting to upload</span><span class="tick"></span>`;
-        row.querySelector('.title').textContent = f.name.replace(/\.[^.]+$/, '');
-        rows.appendChild(row);
-        const st = row.querySelector('.st');
-        let pct = 0;
-        setTimeout(() => {
-          const t = setInterval(() => {
-            pct = Math.min(100, pct + 20);
-            if (failAt === i + 1 && pct >= 60) {
-              clearInterval(t);
-              st.textContent = 'Upload failed: Network error';
-              if (++finished === files.length && !stuck) head.textContent = 'Uploads complete';
-              return;
-            }
-            st.textContent = pct < 100 ? `Uploading ${pct}% ...` : '100% uploaded';
-            if (pct >= 100) {
-              clearInterval(t);
-              row.querySelector('.tick').textContent = '✓';
-              if (++finished === files.length && !stuck) head.textContent = 'Uploads complete';
-            }
-          }, speed * 200);
-        }, i * 300);
-      });
+      root.getElementById('panel').classList.add('open');
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<span class="title"></span><span class="st">Waiting to upload</span><span class="tick"></span>`;
+      row.querySelector('.title').textContent = title;
+      root.getElementById('rows').appendChild(row);
+      return row;
+    }
+    heading() {
+      const rows = [...this.shadowRoot.querySelectorAll('.st')];
+      this.shadowRoot.getElementById('head').textContent =
+        rows.every(r => /100% uploaded|failed/.test(r.textContent)) ? 'Uploads complete' : `Uploading ${rows.length} videos`;
     }
   }
   customElements.define('ytcp-multi-progress-monitor', ProgressMonitor);
@@ -99,37 +86,153 @@
       const root = this.attachShadow({ mode: 'open' });
       root.innerHTML = `
         <style>
-          .box { background: #fff; width: 640px; border-radius: 12px; padding: 24px; font-family: inherit; }
+          .box { background: #fff; width: 760px; border-radius: 12px; padding: 24px; font-family: inherit; }
           .drop { border: 2px dashed #ccc; border-radius: 12px; padding: 48px; text-align: center; }
-          h2 { margin-top: 0; }
+          [contenteditable] { border: 1px solid #bbb; border-radius: 4px; padding: 8px; margin: 4px 0 12px; min-height: 20px; }
+          tp-yt-paper-radio-button { display: block; padding: 6px; cursor: pointer; }
+          tp-yt-paper-radio-button[aria-checked="true"]::before { content: "◉ "; }
+          tp-yt-paper-radio-button[aria-checked="false"]::before { content: "○ "; }
+          .step { display: none; } .step.on { display: block; }
+          footer { display: flex; gap: 12px; align-items: center; margin-top: 16px; }
+          footer .prog { flex: 1; color: #555; }
+          ytcp-button { border: 1px solid #ccc; border-radius: 18px; padding: 8px 16px; cursor: pointer; }
         </style>
         <div class="box">
           <h2 id="head">Upload videos</h2>
           <div class="drop" id="drop">Drag and drop video files to upload<br><br>
-            <input type="file" name="Filedata" multiple id="picker"></div>
+            <input type="file" name="Filedata" id="picker"></div>
           <div id="msg"></div>
+          <div id="details" style="display:none">
+            <div class="step" data-step="0">
+              <ytcp-social-suggestions-textbox id="title-textarea">Title (required)
+                <div id="textbox" contenteditable="true" aria-label="Add a title that describes your video (type @ to mention a channel)"></div>
+              </ytcp-social-suggestions-textbox>
+              <ytcp-social-suggestions-textbox id="description-textarea">Description
+                <div id="textbox" contenteditable="true" aria-label="Tell viewers about your video (type @ to mention a channel)"></div>
+              </ytcp-social-suggestions-textbox>
+              <p>Audience: is this video made for kids? (required)</p>
+              <tp-yt-paper-radio-button role="radio" name="VIDEO_MADE_FOR_KIDS_MFK" aria-checked="false">Yes, it's made for kids</tp-yt-paper-radio-button>
+              <tp-yt-paper-radio-button role="radio" name="VIDEO_MADE_FOR_KIDS_NOT_MFK" aria-checked="false">No, it's not made for kids</tp-yt-paper-radio-button>
+            </div>
+            <div class="step" data-step="1"><p>Video elements</p></div>
+            <div class="step" data-step="2"><p>Checks</p></div>
+            <div class="step" data-step="3">
+              <p>Visibility</p>
+              <div id="privacy-radios">
+                <tp-yt-paper-radio-button role="radio" name="PRIVATE" aria-checked="false">Private</tp-yt-paper-radio-button>
+                <tp-yt-paper-radio-button role="radio" name="UNLISTED" aria-checked="false">Unlisted</tp-yt-paper-radio-button>
+                <tp-yt-paper-radio-button role="radio" name="PUBLIC" aria-checked="false">Public</tp-yt-paper-radio-button>
+              </div>
+              <p>Video link <a id="link" href="#"></a></p>
+            </div>
+            <footer>
+              <span class="prog" id="prog"></span>
+              <ytcp-button id="next-button" role="button">Next</ytcp-button>
+              <ytcp-button id="done-button" role="button" style="display:none">Save</ytcp-button>
+            </footer>
+          </div>
         </div>`;
-      root.getElementById('picker').addEventListener('change', e => this.start([...e.target.files]));
+      root.getElementById('picker').addEventListener('change', e => this.start(e.target.files[0]));
+      const groupOf = el => el.getAttribute('name').startsWith('VIDEO_MADE') ? 'kids' : 'visibility';
+      for (const r of root.querySelectorAll('tp-yt-paper-radio-button')) r.addEventListener('click', () => {
+        for (const o of root.querySelectorAll('tp-yt-paper-radio-button'))
+          if (groupOf(o) === groupOf(r)) o.setAttribute('aria-checked', String(o === r));
+      });
+      root.getElementById('next-button').addEventListener('click', () => this.go(this.step + 1));
+      root.getElementById('done-button').addEventListener('click', () => this.save());
     }
-    start(files) {
+    reset() {
       const root = this.shadowRoot;
-      if (!files.length) return;
-      const used = Number(localStorage.getItem(usedKey) || 0);
-      if (limit !== null && used + files.length > limit) {
+      root.getElementById('drop').style.display = '';
+      root.getElementById('details').style.display = 'none';
+      root.getElementById('msg').textContent = '';
+      root.getElementById('head').textContent = 'Upload videos';
+      root.getElementById('picker').value = '';
+      for (const r of root.querySelectorAll('tp-yt-paper-radio-button')) r.setAttribute('aria-checked', 'false');
+    }
+    go(n) {
+      this.step = Math.min(3, n);
+      for (const s of this.shadowRoot.querySelectorAll('.step')) s.classList.toggle('on', Number(s.dataset.step) === this.step);
+      this.shadowRoot.getElementById('next-button').style.display = this.step === 3 ? 'none' : '';
+      this.shadowRoot.getElementById('done-button').style.display = this.step === 3 ? '' : 'none';
+    }
+    start(file) {
+      const root = this.shadowRoot;
+      if (!file) return;
+      const used = store.get('used', 0);
+      if (limit !== null && used >= limit) {
         root.getElementById('drop').style.display = 'none';
         root.getElementById('head').textContent = 'Daily upload limit reached';
         root.getElementById('msg').textContent = 'You can upload more videos in 24 hours.';
         return;
       }
-      localStorage.setItem(usedKey, used + files.length);
+      store.set('used', used + 1);
+      const n = used + 1;
+      const name = file.name.replace(/\.[^.]+$/, '');
+      root.getElementById('drop').style.display = 'none';
+      root.getElementById('details').style.display = '';
+      root.getElementById('head').textContent = name;
+      // Studio pre-fills the title from the file name without its punctuation.
+      root.querySelector('#title-textarea #textbox').textContent = name.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      root.querySelector('#description-textarea #textbox').textContent = '';
+      const link = root.getElementById('link');
+      link.href = link.textContent = 'https://youtu.be/TEST' + n;
+      this.go(0);
+      // The upload runs from now on, in the background.
+      const up = { n, name, pct: 0, done: false, failed: false, row: null };
+      this.current = up;
+      active++;
+      store.set('maxConcurrent', Math.max(store.get('maxConcurrent', 0), active));
+      const tick = setInterval(() => {
+        if (stuck && up.pct >= 80) return;
+        if (failAt === n && up.pct >= 60) { clearInterval(tick); up.failed = true; active--; this.show(up); return; }
+        up.pct = Math.min(100, up.pct + 20);
+        if (up.pct >= 100) { clearInterval(tick); up.done = true; active--; this.markDone(up); }
+        this.show(up);
+      }, speed * 200);
+      this.show(up);
+    }
+    show(up) {
+      const text = up.failed ? 'Upload failed: Network error' : up.done ? '100% uploaded' : `Uploading ${up.pct}% ...`;
+      if (this.current === up) this.shadowRoot.getElementById('prog').textContent = up.done ? 'Upload complete ... Processing will begin shortly' : text;
+      if (up.row) { up.row.querySelector('.st').textContent = text; if (up.done) up.row.querySelector('.tick').textContent = '✓'; document.getElementById('monitor').heading(); }
+    }
+    markDone(up) {
+      const saved = store.get('saved', []);
+      const s = saved.find(x => x.n === up.n);
+      if (s) { s.completed = true; store.set('saved', saved); }
+      else up.completeBeforeSave = true;
+    }
+    save() {
+      const root = this.shadowRoot;
+      const up = this.current;
+      const checked = name => root.querySelector(`tp-yt-paper-radio-button[name="${name}"]`).getAttribute('aria-checked') === 'true';
+      const saved = store.get('saved', []);
+      saved.push({
+        n: up.n, file: up.name,
+        title: root.querySelector('#title-textarea #textbox').textContent,
+        description: root.querySelector('#description-textarea #textbox').textContent,
+        notForKids: checked('VIDEO_MADE_FOR_KIDS_NOT_MFK'), private: checked('PRIVATE'),
+        link: root.getElementById('link').href, completed: !!up.completeBeforeSave,
+      });
+      store.set('saved', saved);
+      up.row = document.getElementById('monitor').add(root.querySelector('#title-textarea #textbox').textContent);
+      this.show(up);
       document.getElementById('backdrop').classList.remove('open');
-      document.getElementById('monitor').start(files);
+      this.current = null;
+      this.reset();
+      if (!up.done && !up.failed) document.getElementById('notice').classList.add('open');
     }
   }
   customElements.define('ytcp-uploads-dialog', UploadsDialog);
-  const open = () => document.getElementById('backdrop').classList.add('open');
-  document.getElementById('upload-icon').addEventListener('click', open);
-  if (q.get('d') === 'ud') open();
+
+  document.getElementById('create-icon').addEventListener('click', () => document.getElementById('menu').classList.toggle('open'));
+  document.getElementById('text-item-0').addEventListener('click', () => {
+    document.getElementById('menu').classList.remove('open');
+    document.getElementById('dialog').reset();
+    document.getElementById('backdrop').classList.add('open');
+  });
+  document.getElementById('close-button').addEventListener('click', () => document.getElementById('notice').classList.remove('open'));
 </script>
 </body>
 </html>

@@ -45,28 +45,36 @@ Every push builds the app on a clean Windows machine, runs the tests, builds the
 ## Roadmap
 
 1. Rename (Home, Preview, rename, undo, log) — done, tested on a real PC
-2. Batches (up to 15 clips, in rename order; drag a card into Studio or let night mode do it) — **this version**
+2. Batches (up to 15 clips, in rename order; drag a card into Studio by hand) — done
 3. Night mode on a test page — runs in the automated tests on every build (not shown in the app)
-4. Night mode on real YouTube Studio — **this version, first real test pending**
+4. Night mode on real YouTube Studio — one by one with title, description, audience and Private — **this version, first real test pending**
 5. Second PC check
 
 ## Night mode
 
-Night mode opens YouTube Studio in its own Chrome window (a separate Chrome profile; your everyday Chrome is untouched),
-opens the upload box from Studio's home page, hands it one batch, and waits until Studio's upload box says
-**Uploads complete** with a **100% uploaded** tick for every file (processing isn't waited for). Each file is then
-marked in the log on its own: Uploaded, or Failed with Studio's message (failed files are tried again next run).
-It pauses (2 minutes by default, Settings) and starts the next batch from Studio's home page again. The Night mode
-screen counts uploads this run and today.
+Night mode opens YouTube Studio in its own Chrome window (a separate Chrome profile; your everyday Chrome is untouched)
+and uploads the waiting clips **one by one**, the way a person would: Create → Upload videos → the file →
 
-Before the first batch it checks that Studio opens signed in and in English, and keeps the PC awake.
+- **Title:** the file name, e.g. `May 2025 - Muth - 3 (30.10.26)` (punctuation kept)
+- **Description:** `File Name: May 2025 - Muth - 3 (30.10.26), Upload Date: 01.11.26` (the day it's uploaded)
+- **Audience:** No, it's not made for kids
+- **Visibility:** Private → **Save**
 
-It stops by itself and says why, with a screenshot, when Studio shows a limit message, when Chrome is signed out,
-when a batch takes over 20 minutes, or when the uploads look finished but Studio's box doesn't say so (it then saves
-a screenshot and the box's text for checking).
+The file keeps uploading in the background while the next video starts: a new video every **45 seconds**
+(Settings), never more than **3 uploading at once**. A clip is marked **Uploaded** in the log (with its YouTube link)
+only when Studio's upload box shows it **100% uploaded**. Studio is refreshed every 20 videos, only when nothing is
+uploading (a refresh would cut uploads off). The Night mode screen counts uploads this run and today.
+
+Before the first video it checks that Studio opens signed in and in English, and keeps the PC awake.
+
+It stops by itself and says why, with a screenshot and the page's text, when Studio shows a limit message, when Chrome
+is signed out, when a file takes over 20 minutes to upload, or when a screen isn't what it expects.
+**Stop** first finishes the uploads in progress; **Stop now** stops at once.
+
+If an upload fails after its video was saved, a broken entry is left on YouTube: the log says so (with the link) and
+the clip is uploaded again on the next run.
 
 First time: Night mode → **Sign in** → sign in to the channel's Google account in the Chrome window that opens, then close that window. (It opens as ordinary Chrome because Google refuses sign-in in a browser a program controls; night mode reopens it itself.) Try a small batch first.
 
-Titles on YouTube come from the file names; YouTube removes punctuation from them (so `Test - Kovil - 1 (30.10.26)`
-becomes `Test   Kovil   1 30 10 26`). Night mode drives YouTube Studio's website, which YouTube's terms don't
+Night mode drives YouTube Studio's website, which YouTube's terms don't
 officially allow for automated tools; use it knowing the channel carries that risk.
