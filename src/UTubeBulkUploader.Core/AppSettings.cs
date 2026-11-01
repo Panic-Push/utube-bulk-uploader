@@ -46,8 +46,6 @@ public sealed class AppSettings
     public string? ChromePath { get; set; }
     /// <summary>Pause between batches in night mode.</summary>
     public int NightGapMinutes { get; set; } = 2;
-    /// <summary>"practice" or "real".</summary>
-    public string NightTarget { get; set; } = "practice";
 
     public string EffectiveLogPath => string.IsNullOrWhiteSpace(LogFilePath) ? AppPaths.DefaultLogPath : LogFilePath!;
 

@@ -32,7 +32,8 @@ public static class BatchPlanner
         {
             if (string.IsNullOrEmpty(row.Fingerprint) || !seen.Add(row.Fingerprint)) continue;
             var current = latest[row.Fingerprint];
-            if (current.Status != LogStatus.Renamed) continue;
+            // Failed uploads are tried again on the next run.
+            if (current.Status != LogStatus.Renamed && current.Status != LogStatus.Failed) continue;
             if (!exists(current.CurrentPath)) { missing.Add(current); continue; }
             waiting.Add(current);
         }
@@ -45,6 +46,24 @@ public static class BatchPlanner
         }
         return batches;
     }
+
+    /// <summary>Records each file on its own: Uploaded, or Failed with Studio's message. Returns false if the log is locked.</summary>
+    public static bool MarkFiles(LogStore log, IEnumerable<(LogRow Row, FileOutcome Outcome)> outcomes, string note)
+    {
+        var now = DateTime.Now;
+        foreach (var (r, o) in outcomes)
+        {
+            r.Status = o.Uploaded ? LogStatus.Uploaded : LogStatus.Failed;
+            r.StatusTime = now;
+            var add = o.Uploaded ? note : $"{note} {o.Note}";
+            r.Note = string.IsNullOrEmpty(r.Note) ? add : $"{r.Note} {add}";
+        }
+        return log.TrySave();
+    }
+
+    /// <summary>Clips marked uploaded since midnight.</summary>
+    public static int UploadedToday(LogStore log) =>
+        log.LatestByFingerprint().Values.Count(r => r.Status == LogStatus.Uploaded && r.StatusTime.Date == DateTime.Today);
 
     /// <summary>Marks every clip in the batch as uploaded and saves the log (returns false if the log is locked).</summary>
     public static bool MarkUploaded(LogStore log, Batch batch, string note)

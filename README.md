@@ -46,21 +46,26 @@ Every push builds the app on a clean Windows machine, runs the tests, builds the
 
 1. Rename (Home, Preview, rename, undo, log) — done, tested on a real PC
 2. Batches (up to 15 clips, in rename order; drag a card into Studio or let night mode do it) — **this version**
-3. Night mode on a practice page — **this version**
+3. Night mode on a test page — runs in the automated tests on every build (not shown in the app)
 4. Night mode on real YouTube Studio — **this version, first real test pending**
 5. Second PC check
 
 ## Night mode
 
 Night mode opens YouTube Studio in its own Chrome window (a separate Chrome profile; your everyday Chrome is untouched),
-opens the upload box, hands it one batch, waits until Studio has finished uploading every file, marks the batch as
-uploaded in the log, pauses (2 minutes by default, Settings), and starts the next batch.
+opens the upload box from Studio's home page, hands it one batch, and waits until Studio's upload box says
+**Uploads complete** with a **100% uploaded** tick for every file (processing isn't waited for). Each file is then
+marked in the log on its own: Uploaded, or Failed with Studio's message (failed files are tried again next run).
+It pauses (2 minutes by default, Settings) and starts the next batch from Studio's home page again. The Night mode
+screen counts uploads this run and today.
+
+Before the first batch it checks that Studio opens signed in and in English, and keeps the PC awake.
 
 It stops by itself and says why, with a screenshot, when Studio shows a limit message, when Chrome is signed out,
-when a batch takes over 25 minutes, or when the page isn't what it expects.
+when a batch takes over 20 minutes, or when the uploads look finished but Studio's box doesn't say so (it then saves
+a screenshot and the box's text for checking).
 
-First time: Night mode → **Sign in** → sign in to the channel's Google account in the Chrome window that opens, then close that window. (It opens as ordinary Chrome because Google refuses sign-in in a browser a program controls; night mode reopens it itself.) Try **Practice page**
-first (nothing is uploaded), then a small real batch.
+First time: Night mode → **Sign in** → sign in to the channel's Google account in the Chrome window that opens, then close that window. (It opens as ordinary Chrome because Google refuses sign-in in a browser a program controls; night mode reopens it itself.) Try a small batch first.
 
 Titles on YouTube come from the file names; YouTube removes punctuation from them (so `Test - Kovil - 1 (30.10.26)`
 becomes `Test   Kovil   1 30 10 26`). Night mode drives YouTube Studio's website, which YouTube's terms don't

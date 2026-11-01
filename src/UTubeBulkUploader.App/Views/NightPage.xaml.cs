@@ -18,6 +18,7 @@ public sealed partial class NightPage : Page, IActivatable
     private DateTime? _nextAt;
     private string? _screenshot;
     private bool _loading = true;
+    private int _startToday;
 
     public bool Running => _cts is not null;
 
@@ -25,7 +26,6 @@ public sealed partial class NightPage : Page, IActivatable
     {
         InitializeComponent();
         Activity.ItemsSource = _activity;
-        TargetChoice.SelectedIndex = _host.Settings.NightTarget == "real" ? 1 : 0;
         _loading = false;
         _countdown.Tick += (_, _) => UpdateCountdown();
         _host.LogChanged += () => { if (!Running) RefreshSummary(); };
@@ -39,14 +39,6 @@ public sealed partial class NightPage : Page, IActivatable
         RefreshChrome();
     }
 
-    private bool Real => (TargetChoice.SelectedItem as RadioButton)?.Tag as string == "real";
-
-    private void OnTargetChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_loading) return;
-        _host.SaveSettings(s => s.NightTarget = Real ? "real" : "practice");
-    }
-
     private void RefreshSummary()
     {
         var batches = BatchPlanner.Plan(_host.LogFile, _host.Settings.BatchSize, out _);
@@ -54,6 +46,8 @@ public sealed partial class NightPage : Page, IActivatable
         Summary.Text = clips == 0 ? "Nothing waiting: rename clips first."
             : $"{Format.Count(clips, "clip")} waiting in {Format.Count(batches.Count, "batch", "batches")} · {_host.Settings.NightGapMinutes} min pause between batches";
         StartButton.IsEnabled = !Running && clips > 0;
+        StatToday.Text = BatchPlanner.UploadedToday(_host.LogFile).ToString();
+        StatLeft.Text = clips.ToString();
     }
 
     private void RefreshChrome()
@@ -111,8 +105,7 @@ public sealed partial class NightPage : Page, IActivatable
             await Ui.Inform(XamlRoot, "Chrome not found", "Install Google Chrome, or set its location in Settings.");
             return;
         }
-        var real = Real;
-        if (real && !await Ui.Confirm(XamlRoot, "Start real uploads?",
+        if (!await Ui.Confirm(XamlRoot, "Start real uploads?",
                 "Night mode will upload the waiting batches to the YouTube channel signed in to its Chrome window, " +
                 $"with a {_host.Settings.NightGapMinutes}-minute pause between batches, until everything is done or Studio says stop.\n\n" +
                 "Don't use that Chrome window while it runs. Keep this PC awake and connected.", "Start")) return;
@@ -123,27 +116,30 @@ public sealed partial class NightPage : Page, IActivatable
         ResultBar.IsOpen = false;
         StartButton.IsEnabled = false;
         StopButton.IsEnabled = true;
-        TargetChoice.IsEnabled = false;
         StatusTitle.Text = "Starting";
         StatusDetail.Text = "";
         Bar.Value = 0;
         KeepAwake(true);
-        Add(real ? "Night mode started (YouTube Studio)." : "Night mode started (practice page).");
+        StatRun.Text = "0";
+        StatFailed.Text = "0";
+        _startToday = BatchPlanner.UploadedToday(_host.LogFile);
+        Add("Night mode started. Checking before the first batch…");
+        Add("✓ This PC is kept awake while night mode runs");
 
         BatchResult result;
         try
         {
-            var target = real ? StudioTarget.Real : StudioTarget.PracticePage("speed=2");
+            var target = StudioTarget.Real;
             var port = await ChromeLauncher.EnsureRunningAsync(chrome, ChromeLauncher.ProfileDir, target.HomeUrl, ct);
             await using var tab = await CdpTab.ConnectAsync(port, ct);
             await tab.SendAsync("Page.bringToFront", ct: ct);
             var driver = new StudioDriver(tab, target);
             await driver.InitAsync(ct);
-            var gap = real ? TimeSpan.FromMinutes(_host.Settings.NightGapMinutes) : TimeSpan.FromSeconds(10);
+            var gap = TimeSpan.FromMinutes(_host.Settings.NightGapMinutes);
             var runner = new NightRunner { Gap = gap };
             runner.Activity += Add;
             runner.Progress += p => _host.Ui(() => ShowProgress(p));
-            result = await Task.Run(() => runner.RunAsync(driver, _host.LogFile, _host.Settings.BatchSize, practice: !real, ct), CancellationToken.None);
+            result = await Task.Run(() => runner.RunAsync(driver, _host.LogFile, _host.Settings.BatchSize, ct), CancellationToken.None);
         }
         catch (OperationCanceledException) { result = new BatchResult(BatchOutcome.Stopped, "Stopped."); }
         catch (Exception ex)
@@ -158,8 +154,7 @@ public sealed partial class NightPage : Page, IActivatable
         _nextAt = null;
         _countdown.Stop();
         StopButton.IsEnabled = false;
-        TargetChoice.IsEnabled = true;
-        if (real) _host.NotifyLogChanged();
+        _host.NotifyLogChanged();
         ShowResult(result);
         RefreshSummary();
         RefreshChrome();
@@ -178,8 +173,11 @@ public sealed partial class NightPage : Page, IActivatable
         StatusTitle.Text = $"Batch {p.BatchNumber} of {p.BatchCount}";
         StatusDetail.Text = p.Status;
         Bar.Maximum = Math.Max(1, p.ClipsTotal);
-        Bar.Value = p.ClipsDone;
-        Counts.Text = $"{p.ClipsDone} of {Format.Count(p.ClipsTotal, "clip")} done";
+        Bar.Value = p.Uploaded + p.Failed;
+        StatRun.Text = p.Uploaded.ToString();
+        StatFailed.Text = p.Failed.ToString();
+        StatToday.Text = (_startToday + p.Uploaded).ToString();
+        StatLeft.Text = Math.Max(0, p.ClipsTotal - p.Uploaded - p.Failed).ToString();
         _nextAt = p.NextBatchAt;
         if (_nextAt is not null) { _countdown.Start(); UpdateCountdown(); }
         else _countdown.Stop();
@@ -205,7 +203,7 @@ public sealed partial class NightPage : Page, IActivatable
             _ => (InfoBarSeverity.Error, "Night mode stopped", "Stopped: something unexpected"),
         };
         var extra = r.Outcome is BatchOutcome.StudioLimit or BatchOutcome.TimedOut or BatchOutcome.Error
-            ? " The batch that was running is not marked uploaded; check it in YouTube Studio > Content."
+            ? " Files Studio had already ticked are marked uploaded; the rest of that batch will be tried again next run."
             : "";
         ResultBar.Message = r.Message + extra;
         ScreenshotButton.Visibility = Ui.Show(_screenshot is not null);

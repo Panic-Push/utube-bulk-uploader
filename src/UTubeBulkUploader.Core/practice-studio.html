@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Practice Studio (UTube Bulk Uploader)</title>
+<title>Test Studio (UTube Bulk Uploader)</title>
 <style>
   body { font-family: "Segoe UI", Roboto, sans-serif; margin: 0; background: #f9f9f9; color: #0f0f0f; }
   header { display: flex; align-items: center; gap: 12px; padding: 12px 24px; background: #fff; border-bottom: 1px solid #e5e5e5; }
@@ -16,18 +16,83 @@
 </head>
 <body>
 <header>
-  <b>Practice Studio</b>
+  <b>Test Studio</b>
   <button id="upload-icon" aria-label="Upload videos">⬆ Upload</button>
-  <span class="note">A copy for testing night mode. Nothing is sent anywhere.</span>
+  <span class="note">Used by the app's automated tests. Nothing is sent anywhere.</span>
 </header>
-<main><h1>Channel dashboard</h1><p>Practice page. Uploads here are simulated.</p></main>
+<main><h1>Channel dashboard</h1><p>Test page. Uploads here are simulated.</p></main>
 <div class="backdrop" id="backdrop"><ytcp-uploads-dialog id="dialog"></ytcp-uploads-dialog></div>
+<ytcp-multi-progress-monitor id="monitor"></ytcp-multi-progress-monitor>
 <script>
+  // Mirrors YouTube Studio's upload flow: the "Upload videos" box takes the files, closes, and a progress box
+  // in the corner lists every file ("Uploading 40%" ... "100% uploaded" with a tick) under a heading that
+  // ends as "Uploads complete".
   // Options: ?speed=seconds-per-file  &limit=files-allowed-today (stored in localStorage)
+  //          &fail=N (the Nth file fails)  &stuck=1 (the heading never says complete)
   const q = new URLSearchParams(location.search);
   const speed = Number(q.get('speed') || 3);
   const limit = q.get('limit') ? Number(q.get('limit')) : null;
+  const failAt = q.get('fail') ? Number(q.get('fail')) : null;
+  const stuck = q.get('stuck') === '1';
   const usedKey = 'ubu-practice-used';
+
+  class ProgressMonitor extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `
+        <style>
+          .panel { position: fixed; right: 24px; bottom: 24px; width: 560px; background: #fff; border-radius: 12px;
+                   box-shadow: 0 4px 24px rgba(0,0,0,.2); display: none; font-size: 15px; }
+          .panel.open { display: block; }
+          .head { display: flex; align-items: center; padding: 16px 20px; font-size: 18px; font-weight: 600; }
+          .head span { flex: 1; }
+          .row { display: flex; align-items: center; gap: 12px; padding: 12px 20px; }
+          .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; }
+          .tick { color: #2ba640; width: 20px; }
+        </style>
+        <div class="panel" id="panel">
+          <div class="head"><span id="head"></span><button aria-label="Close" id="close">✕</button></div>
+          <div id="rows"></div>
+        </div>`;
+      root.getElementById('close').addEventListener('click', () => root.getElementById('panel').classList.remove('open'));
+    }
+    start(files) {
+      const root = this.shadowRoot;
+      const panel = root.getElementById('panel');
+      const head = root.getElementById('head');
+      const rows = root.getElementById('rows');
+      panel.classList.add('open');
+      head.textContent = `Uploading ${files.length} videos`;
+      let finished = 0;
+      files.forEach((f, i) => {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = `<span class="title"></span><span class="st">Waiting to upload</span><span class="tick"></span>`;
+        row.querySelector('.title').textContent = f.name.replace(/\.[^.]+$/, '');
+        rows.appendChild(row);
+        const st = row.querySelector('.st');
+        let pct = 0;
+        setTimeout(() => {
+          const t = setInterval(() => {
+            pct = Math.min(100, pct + 20);
+            if (failAt === i + 1 && pct >= 60) {
+              clearInterval(t);
+              st.textContent = 'Upload failed: Network error';
+              if (++finished === files.length && !stuck) head.textContent = 'Uploads complete';
+              return;
+            }
+            st.textContent = pct < 100 ? `Uploading ${pct}% ...` : '100% uploaded';
+            if (pct >= 100) {
+              clearInterval(t);
+              row.querySelector('.tick').textContent = '✓';
+              if (++finished === files.length && !stuck) head.textContent = 'Uploads complete';
+            }
+          }, speed * 200);
+        }, i * 300);
+      });
+    }
+  }
+  customElements.define('ytcp-multi-progress-monitor', ProgressMonitor);
 
   class UploadsDialog extends HTMLElement {
     connectedCallback() {
@@ -36,50 +101,29 @@
         <style>
           .box { background: #fff; width: 640px; border-radius: 12px; padding: 24px; font-family: inherit; }
           .drop { border: 2px dashed #ccc; border-radius: 12px; padding: 48px; text-align: center; }
-          .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 14px; }
           h2 { margin-top: 0; }
         </style>
         <div class="box">
           <h2 id="head">Upload videos</h2>
           <div class="drop" id="drop">Drag and drop video files to upload<br><br>
             <input type="file" name="Filedata" multiple id="picker"></div>
-          <div id="rows"></div>
+          <div id="msg"></div>
         </div>`;
       root.getElementById('picker').addEventListener('change', e => this.start([...e.target.files]));
     }
     start(files) {
       const root = this.shadowRoot;
       if (!files.length) return;
-      root.getElementById('drop').style.display = 'none';
-      const head = root.getElementById('head');
       const used = Number(localStorage.getItem(usedKey) || 0);
       if (limit !== null && used + files.length > limit) {
-        head.textContent = 'Daily upload limit reached';
-        root.getElementById('rows').textContent = 'You can upload more videos in 24 hours.';
+        root.getElementById('drop').style.display = 'none';
+        root.getElementById('head').textContent = 'Daily upload limit reached';
+        root.getElementById('msg').textContent = 'You can upload more videos in 24 hours.';
         return;
       }
       localStorage.setItem(usedKey, used + files.length);
-      head.textContent = `Uploading ${files.length} videos`;
-      const rows = root.getElementById('rows');
-      let finished = 0;
-      files.forEach((f, i) => {
-        const row = document.createElement('div');
-        row.className = 'row';
-        row.innerHTML = `<span>${f.name.replace(/\.[^.]+$/, '')}</span><span class="st">Waiting to upload</span>`;
-        rows.appendChild(row);
-        const st = row.querySelector('.st');
-        let pct = 0;
-        setTimeout(() => {
-          const t = setInterval(() => {
-            pct = Math.min(100, pct + 20);
-            st.textContent = pct < 100 ? `Uploading ${pct}%` : 'Upload complete';
-            if (pct >= 100) {
-              clearInterval(t);
-              if (++finished === files.length) head.textContent = 'Uploads complete';
-            }
-          }, speed * 200);
-        }, i * 300);
-      });
+      document.getElementById('backdrop').classList.remove('open');
+      document.getElementById('monitor').start(files);
     }
   }
   customElements.define('ytcp-uploads-dialog', UploadsDialog);

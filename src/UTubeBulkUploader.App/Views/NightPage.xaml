@@ -13,18 +13,7 @@
             </StackPanel>
 
             <InfoBar IsOpen="True" IsClosable="True" Severity="Informational"
-                     Message="Night mode opens YouTube Studio in its own Chrome window and uploads one batch at a time, with a pause between batches. It stops by itself when Studio says to stop, when it's signed out, or when anything looks unexpected. Someone should keep an eye on it." />
-
-            <!-- Where to upload -->
-            <Border Style="{StaticResource CardStyle}">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Upload to" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <RadioButtons x:Name="TargetChoice" SelectionChanged="OnTargetChanged">
-                        <RadioButton Content="Practice page: nothing is uploaded and the log isn't changed" Tag="practice" />
-                        <RadioButton Content="YouTube Studio: real uploads to the signed-in channel" Tag="real" />
-                    </RadioButtons>
-                </StackPanel>
-            </Border>
+                     Message="Night mode opens YouTube Studio in its own Chrome window and uploads one batch at a time. A batch counts as done when Studio's upload box says Uploads complete with a 100% uploaded tick for every file; processing isn't waited for. It stops by itself when Studio says to stop, when it's signed out, when a batch takes over 20 minutes, or when anything looks unexpected." />
 
             <!-- Chrome -->
             <Border Style="{StaticResource CardStyle}">
@@ -68,7 +57,28 @@
                         </StackPanel>
                     </Grid>
                     <ProgressBar x:Name="Bar" Maximum="1" Value="0" />
-                    <TextBlock x:Name="Counts" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <!-- Upload counter -->
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="StatRun" Text="0" Style="{StaticResource TitleTextBlockStyle}" />
+                            <TextBlock Text="Uploaded this run" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock x:Name="StatToday" Text="0" Style="{StaticResource TitleTextBlockStyle}" />
+                            <TextBlock Text="Uploaded today" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock x:Name="StatFailed" Text="0" Style="{StaticResource TitleTextBlockStyle}" />
+                            <TextBlock Text="Failed this run" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3">
+                            <TextBlock x:Name="StatLeft" Text="0" Style="{StaticResource TitleTextBlockStyle}" />
+                            <TextBlock Text="Still waiting" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </Grid>
                 </StackPanel>
             </Border>
 

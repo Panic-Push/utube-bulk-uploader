@@ -34,6 +34,15 @@ public class BatchTests
     }
 
     [Fact]
+    public void TodaysUploadsAreCounted()
+    {
+        using var t = new TempDir();
+        var log = LogWith(t, 5, i => i <= 3 ? LogStatus.Uploaded : LogStatus.Renamed);
+        log.Rows[0].StatusTime = DateTime.Today.AddDays(-1);
+        Assert.Equal(2, BatchPlanner.UploadedToday(log));
+    }
+
+    [Fact]
     public void UploadedUndoneAndMissingAreLeftOut()
     {
         using var t = new TempDir();
@@ -65,10 +74,10 @@ public class BatchTests
     }
 }
 
-/// <summary>Runs night mode for real in Chrome (headless) against the practice page, when Chrome is installed.</summary>
+/// <summary>Runs night mode for real in Chrome (headless) against the test copy of Studio, when Chrome is installed.</summary>
 public class NightPracticeTests
 {
-    private static async Task<(BatchResult, LogStore, TempDir)> Run(int clips, string query, bool practice)
+    private static async Task<(BatchResult, LogStore, TempDir)> Run(int clips, string query)
     {
         var chrome = ChromeLauncher.FindChrome(Environment.GetEnvironmentVariable("UBU_CHROME"));
         var t = new TempDir();
@@ -86,18 +95,18 @@ public class NightPracticeTests
         await using var tab = await CdpTab.ConnectAsync(port, CancellationToken.None);
         var driver = new StudioDriver(tab, StudioTarget.PracticePage(query))
         {
-            QuietPeriod = TimeSpan.FromSeconds(3), PollInterval = TimeSpan.FromSeconds(1), ScreenshotDir = t.Root,
+            StuckAfter = TimeSpan.FromSeconds(4), PollInterval = TimeSpan.FromSeconds(1), ScreenshotDir = t.Root,
         };
         await driver.InitAsync(CancellationToken.None);
-        var r = await new NightRunner { Gap = TimeSpan.FromSeconds(2) }.RunAsync(driver, log, 15, practice, CancellationToken.None);
+        var r = await new NightRunner { Gap = TimeSpan.FromSeconds(2) }.RunAsync(driver, log, 15, CancellationToken.None);
         try { await tab.SendAsync("Browser.close"); } catch (Exception) { }
         return (r, log, t);
     }
 
     [Fact]
-    public async Task UploadsAllBatchesAndMarksThem()
+    public async Task UploadsAllBatchesAndMarksEachFile()
     {
-        var (r, log, t) = await Run(17, "speed=1", practice: false);
+        var (r, log, t) = await Run(17, "speed=1");
         using var _ = t;
         if (r.Message == "no chrome") return;
         Assert.Equal(BatchOutcome.Done, r.Outcome);
@@ -105,9 +114,38 @@ public class NightPracticeTests
     }
 
     [Fact]
+    public async Task OneFailedFileIsMarkedFailedAndTheRestUploaded()
+    {
+        var (r, log, t) = await Run(4, "speed=1&fail=2");
+        using var _ = t;
+        if (r.Message == "no chrome") return;
+        Assert.Equal(BatchOutcome.Done, r.Outcome);
+        Assert.Equal(3, log.Rows.Count(x => x.Status == LogStatus.Uploaded));
+        var failed = Assert.Single(log.Rows, x => x.Status == LogStatus.Failed);
+        Assert.Equal("Story - 2 (30.10.26).mp4", failed.NewName);
+        Assert.Contains("Network error", failed.Note);
+        // Failed clips are offered again on the next run.
+        Assert.Equal("fp2", BatchPlanner.Plan(log, 15, out var _missing).Single().Rows.Single().Fingerprint);
+    }
+
+    [Fact]
+    public async Task StopsAndSavesWhatItSawWhenTheBoxNeverSaysComplete()
+    {
+        var (r, log, t) = await Run(3, "speed=1&stuck=1");
+        using var _ = t;
+        if (r.Message == "no chrome") return;
+        Assert.Equal(BatchOutcome.Error, r.Outcome);
+        Assert.Contains("Uploads complete", r.Message);
+        Assert.NotNull(r.ScreenshotPath);
+        Assert.True(File.Exists(Path.ChangeExtension(r.ScreenshotPath!, ".txt")));
+        // Files Studio did tick are still recorded.
+        Assert.Equal(3, log.Rows.Count(x => x.Status == LogStatus.Uploaded));
+    }
+
+    [Fact]
     public async Task StopsWhenStudioShowsItsLimit()
     {
-        var (r, log, t) = await Run(5, "speed=1&limit=2", practice: false);
+        var (r, log, t) = await Run(5, "speed=1&limit=2");
         using var _ = t;
         if (r.Message == "no chrome") return;
         Assert.Equal(BatchOutcome.StudioLimit, r.Outcome);
