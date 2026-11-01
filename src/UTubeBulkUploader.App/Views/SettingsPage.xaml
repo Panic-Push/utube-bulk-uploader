@@ -42,8 +42,8 @@
                     <TextBlock Text="Video file types" />
                     <TextBlock Text="Separate with commas. Other files (XML, THM and so on) are always left alone. Applies to folders you add from now on." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                    <TextBox x:Name="Types" Width="260" LostFocus="OnTypesCommitted" KeyDown="OnTypesKey" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBox x:Name="Types" Width="260" VerticalAlignment="Center" LostFocus="OnTypesCommitted" KeyDown="OnTypesKey" />
                     <Button Content="Default" Click="OnTypesDefault" />
                 </StackPanel>
             </Grid>
