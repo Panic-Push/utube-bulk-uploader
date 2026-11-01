@@ -59,7 +59,7 @@ uploaded in the log, pauses (2 minutes by default, Settings), and starts the nex
 It stops by itself and says why, with a screenshot, when Studio shows a limit message, when Chrome is signed out,
 when a batch takes over 25 minutes, or when the page isn't what it expects.
 
-First time: Night mode → **Open Chrome** → sign in to the channel's Google account in that window. Try **Practice page**
+First time: Night mode → **Sign in** → sign in to the channel's Google account in the Chrome window that opens, then close that window. (It opens as ordinary Chrome because Google refuses sign-in in a browser a program controls; night mode reopens it itself.) Try **Practice page**
 first (nothing is uploaded), then a small real batch.
 
 Titles on YouTube come from the file names; YouTube removes punctuation from them (so `Test - Kovil - 1 (30.10.26)`

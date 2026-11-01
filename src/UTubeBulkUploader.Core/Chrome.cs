@@ -48,10 +48,70 @@ public static class ChromeLauncher
         catch (Exception) { return null; }
     }
 
+    /// <summary>True while any Chrome window is using this profile (with or without the control port).</summary>
+    public static bool IsProfileInUse(string profileDir)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var lockFile = Path.Combine(profileDir, "lockfile");
+            if (!File.Exists(lockFile)) return false;
+            try
+            {
+                using var _ = new FileStream(lockFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                return false;
+            }
+            catch (IOException) { return true; }
+            catch (UnauthorizedAccessException) { return true; }
+        }
+        return File.Exists(Path.Combine(profileDir, "SingletonLock")) || new FileInfo(Path.Combine(profileDir, "SingletonLock")).LinkTarget is not null;
+    }
+
+    /// <summary>
+    /// Opens the app's Chrome profile as a completely ordinary Chrome window, for signing in to Google.
+    /// Google refuses sign-in ("This browser or app may not be secure") in a Chrome that has its control port open,
+    /// so if night mode's Chrome is running it is closed first. The sign-in is kept in the profile afterwards.
+    /// </summary>
+    public static async Task OpenForSignInAsync(string chromePath, string profileDir, string url, CancellationToken ct)
+    {
+        if (RunningPort(profileDir) is int port)
+        {
+            await CloseAsync(port, ct);
+            var sw = Stopwatch.StartNew();
+            while (IsProfileInUse(profileDir) && sw.Elapsed < TimeSpan.FromSeconds(20))
+                await Task.Delay(300, ct);
+            if (IsProfileInUse(profileDir))
+                throw new NightModeException("The app's Chrome window didn't close. Close it yourself, then click Sign in again.");
+        }
+        Directory.CreateDirectory(profileDir);
+        try { File.Delete(Path.Combine(profileDir, "DevToolsActivePort")); } catch (IOException) { }
+        var psi = new ProcessStartInfo(chromePath) { UseShellExecute = false };
+        foreach (var a in new[] { $"--user-data-dir={profileDir}", "--no-first-run", "--no-default-browser-check", url })
+            psi.ArgumentList.Add(a);
+        Process.Start(psi);
+    }
+
+    /// <summary>Closes the app's Chrome through its control port.</summary>
+    public static async Task CloseAsync(int port, CancellationToken ct)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            var info = JsonNode.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/version", ct))!;
+            using var ws = new ClientWebSocket();
+            await ws.ConnectAsync(new Uri((string)info["webSocketDebuggerUrl"]!), ct);
+            await ws.SendAsync(Encoding.UTF8.GetBytes("{\"id\":1,\"method\":\"Browser.close\"}"), WebSocketMessageType.Text, true, ct);
+            await Task.Delay(500, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { /* already closing or gone */ }
+    }
+
     /// <summary>Returns the control port of the app's Chrome, starting it if needed.</summary>
     public static async Task<int> EnsureRunningAsync(string chromePath, string profileDir, string startUrl, CancellationToken ct)
     {
         if (RunningPort(profileDir) is int p) return p;
+        if (IsProfileInUse(profileDir))
+            throw new NightModeException("The Chrome window opened for signing in is still open. Once you're signed in to the channel, " +
+                                         "close that Chrome window, then click Start again.");
         Directory.CreateDirectory(profileDir);
         try { File.Delete(Path.Combine(profileDir, "DevToolsActivePort")); } catch (IOException) { }
         var psi = new ProcessStartInfo(chromePath) { UseShellExecute = false };

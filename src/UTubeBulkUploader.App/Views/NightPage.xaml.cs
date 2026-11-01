@@ -59,11 +59,13 @@ public sealed partial class NightPage : Page, IActivatable
     private void RefreshChrome()
     {
         var chrome = ChromeLauncher.FindChrome(_host.Settings.ChromePath);
-        var open = ChromeLauncher.RunningPort(ChromeLauncher.ProfileDir) is not null;
+        var running = ChromeLauncher.RunningPort(ChromeLauncher.ProfileDir) is not null;
+        var signingIn = !running && ChromeLauncher.IsProfileInUse(ChromeLauncher.ProfileDir);
         ChromeInfo.Text = chrome is null
             ? "Google Chrome wasn't found. Install Chrome, or set its location in Settings."
-            : open ? "Open. Make sure it's signed in to the channel's Google account (check the top right of YouTube Studio)."
-                   : "Uses its own Chrome profile, separate from your everyday Chrome. Open it once and sign in to the channel's Google account; it stays signed in.";
+            : signingIn ? "Open for signing in. Sign in to the channel's Google account there, then close that Chrome window before starting night mode."
+            : running ? "Night mode's Chrome is open. To sign in or switch account, click Sign in: it reopens Chrome in a normal window."
+            : "Uses its own Chrome profile, separate from your everyday Chrome. Click Sign in once, sign in to the channel's Google account, then close that window; it stays signed in.";
         OpenChromeButton.IsEnabled = chrome is not null;
     }
 
@@ -71,14 +73,21 @@ public sealed partial class NightPage : Page, IActivatable
     {
         var chrome = ChromeLauncher.FindChrome(_host.Settings.ChromePath);
         if (chrome is null) return;
+        if (Running)
+        {
+            await Ui.Inform(XamlRoot, "Night mode is running", "Stop night mode first, then sign in.");
+            return;
+        }
         try
         {
-            if (ChromeLauncher.RunningPort(ChromeLauncher.ProfileDir) is int port)
-            {
-                await using var tab = await CdpTab.ConnectAsync(port, CancellationToken.None);
-                await tab.SendAsync("Page.bringToFront");
-            }
-            else await ChromeLauncher.EnsureRunningAsync(chrome, ChromeLauncher.ProfileDir, StudioTarget.Real.HomeUrl, CancellationToken.None);
+            // Google blocks sign-in in a Chrome that a program controls, so this window opens as plain Chrome.
+            await ChromeLauncher.OpenForSignInAsync(chrome, ChromeLauncher.ProfileDir, StudioTarget.Real.HomeUrl, CancellationToken.None);
+            await Ui.Inform(XamlRoot, "Sign in, then close Chrome",
+                "A normal Chrome window is opening with the app's own profile.\n\n" +
+                "1. Sign in to the Google account that owns the channel.\n" +
+                "2. Check that YouTube Studio opens and is in English.\n" +
+                "3. Close that Chrome window.\n\n" +
+                "You stay signed in. Night mode reopens Chrome itself when it starts.");
         }
         catch (Exception ex)
         {
