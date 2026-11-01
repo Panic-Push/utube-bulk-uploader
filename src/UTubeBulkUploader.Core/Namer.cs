@@ -16,7 +16,7 @@ public static class Namer
         foreach (var folder in story.SelfAndDescendants())
         {
             var parts = folder.TitleParts().Select(SanitizePart).ToList();
-            string date = folder.Date?.ToString(DateFormat, System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            string date = FormatDate(folder.Date);
             int n = folder.Clips.Count(c => c.State == ClipState.AlreadyDone);
 
             foreach (var clip in folder.Clips.OrderBy(c => c.Order))
@@ -130,6 +130,22 @@ public static class Namer
             }
         }
         return count;
+    }
+
+    public static string FormatDate(DateOnly? d) =>
+        d?.ToString(DateFormat, System.Globalization.CultureInfo.InvariantCulture) ?? "";
+
+    /// <summary>Accepts 26.10.26, 26.10.2026, 26/10/26, 26-10-26 and 6.1.26.</summary>
+    public static bool TryParseDate(string text, out DateOnly date)
+    {
+        date = default;
+        var bits = text.Trim().Split('.', '/', '-');
+        if (bits.Length != 3) return false;
+        if (!int.TryParse(bits[0], out var d) || !int.TryParse(bits[1], out var m) || !int.TryParse(bits[2], out var y)) return false;
+        if (bits[2].Trim().Length <= 2) y += 2000;
+        if (y < 1990 || y > 2100 || m < 1 || m > 12 || d < 1 || d > DateTime.DaysInMonth(y, m)) return false;
+        date = new DateOnly(y, m, d);
+        return true;
     }
 
     /// <summary>Returns a reason if the folder can't be added next to the existing stories.</summary>

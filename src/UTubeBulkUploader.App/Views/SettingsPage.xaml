@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="UTubeBulkUploader.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Transparent">
+
+    <Page.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+            <Setter Property="Margin" Value="1,20,0,6" />
+        </Style>
+        <!-- Windows 11 Settings-style row: icon, title, description, control -->
+        <Style x:Key="SettingRow" TargetType="Grid">
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+            <Setter Property="Padding" Value="16,12" />
+            <Setter Property="MinHeight" Value="68" />
+            <Setter Property="ColumnSpacing" Value="16" />
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel Margin="{StaticResource PageMargin}" Spacing="4" MaxWidth="1000" HorizontalAlignment="Stretch">
+            <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}" Margin="0,0,0,8" />
+
+            <TextBlock Text="Renaming" Style="{StaticResource SectionHeader}" />
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE8AC;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Ask before renaming" />
+                    <TextBlock Text="Shows how many files will be renamed and asks you to confirm." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="2" x:Name="Confirm" Toggled="OnToggled" MinWidth="0" />
+            </Grid>
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE714;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Video file types" />
+                    <TextBlock Text="Separate with commas. Other files (XML, THM and so on) are always left alone. Applies to folders you add from now on." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <TextBox x:Name="Types" Width="260" LostFocus="OnTypesCommitted" KeyDown="OnTypesKey" />
+                    <Button Content="Default" Click="OnTypesDefault" />
+                </StackPanel>
+            </Grid>
+
+            <TextBlock Text="Log file" Style="{StaticResource SectionHeader}" />
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE8A5;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Log file location" />
+                    <TextBlock x:Name="LogInfo" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Open" Click="OnOpenLog" />
+                    <Button Content="Change" Click="OnChangeLog" />
+                    <Button x:Name="LogDefault" Content="Desktop" Click="OnLogDefault" ToolTipService.ToolTip="Put the log back on the Desktop" />
+                </StackPanel>
+            </Grid>
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE8B7;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="App data" />
+                    <TextBlock Text="Settings, a backup copy of the log and the technical log (for troubleshooting)." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Column="2" Content="Open folder" Click="OnOpenData" />
+            </Grid>
+
+            <TextBlock Text="Appearance" Style="{StaticResource SectionHeader}" />
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE790;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="App theme" />
+                    <TextBlock Text="The accent colour always follows Windows." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+                <ComboBox Grid.Column="2" x:Name="Theme" Width="200" SelectionChanged="OnTheme">
+                    <ComboBoxItem Content="Use system setting" Tag="system" />
+                    <ComboBoxItem Content="Light" Tag="light" />
+                    <ComboBoxItem Content="Dark" Tag="dark" />
+                </ComboBox>
+            </Grid>
+
+            <TextBlock Text="About" Style="{StaticResource SectionHeader}" />
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                <Image Source="ms-appx:///Assets/UTubeBulkUploader.ico" Width="20" Height="20" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="UTube Bulk Uploader" />
+                    <TextBlock x:Name="VersionInfo" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

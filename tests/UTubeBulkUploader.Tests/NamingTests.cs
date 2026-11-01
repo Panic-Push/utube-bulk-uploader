@@ -223,3 +223,25 @@ public class NamingTests
         Assert.False(story.IsEmpty);
     }
 }
+
+public class DateParsingTests
+{
+    [Fact]
+    public void Accepts_common_date_forms()
+    {
+        foreach (var s in new[] { "26.10.26", "26.10.2026", "26/10/26", "26-10-26", " 26.10.26 " })
+        {
+            Assert.True(Namer.TryParseDate(s, out var d), s);
+            Assert.Equal(new DateOnly(2026, 10, 26), d);
+        }
+        Assert.True(Namer.TryParseDate("6.1.26", out var e));
+        Assert.Equal(new DateOnly(2026, 1, 6), e);
+    }
+
+    [Fact]
+    public void Rejects_impossible_dates()
+    {
+        foreach (var s in new[] { "31.02.26", "26.13.26", "abc", "26.10", "" })
+            Assert.False(Namer.TryParseDate(s, out _));
+    }
+}

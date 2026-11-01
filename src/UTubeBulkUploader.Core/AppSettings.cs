@@ -35,6 +35,8 @@ public sealed class AppSettings
     public string? LogFilePath { get; set; }
     public List<string> VideoExtensions { get; set; } = DefaultVideoExtensions.ToList();
     public bool ConfirmBeforeRename { get; set; } = true;
+    /// <summary>"system", "light" or "dark".</summary>
+    public string Theme { get; set; } = "system";
 
     // Night mode (used from stage 3 on).
     public int NightlyUploadLimit { get; set; } = 100;

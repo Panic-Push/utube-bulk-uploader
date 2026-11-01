@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="UTubeBulkUploader.Views.LogPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:h="using:UTubeBulkUploader.Helpers"
+    xmlns:vm="using:UTubeBulkUploader.ViewModels"
+    Background="Transparent">
+
+    <Grid Margin="{StaticResource PageMargin}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Spacing="4">
+            <TextBlock Text="Log" Style="{StaticResource TitleTextBlockStyle}" />
+            <TextBlock Text="{x:Bind Vm.LogPath, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsTextSelectionEnabled="True" />
+        </StackPanel>
+
+        <InfoBar Grid.Row="1" x:Name="Message" IsOpen="False" IsClosable="True" />
+
+        <AutoSuggestBox Grid.Row="2" PlaceholderText="Search names, folders, status or run" QueryIcon="Find"
+                        Text="{x:Bind Vm.Search, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        AutomationProperties.Name="Search the log" />
+
+        <Grid Grid.Row="3">
+            <CommandBar DefaultLabelPosition="Right" HorizontalAlignment="Left" Background="Transparent">
+                <AppBarButton Label="Undo this rename run" Click="OnUndoRun"
+                              ToolTipService.ToolTip="Give every file renamed in the selected row's run its old name back">
+                    <AppBarButton.Icon><FontIcon Glyph="&#xE7A7;" /></AppBarButton.Icon>
+                </AppBarButton>
+                <AppBarButton Label="Open in Excel" Click="OnOpenExcel">
+                    <AppBarButton.Icon><FontIcon Glyph="&#xE8A5;" /></AppBarButton.Icon>
+                </AppBarButton>
+                <AppBarButton Label="Show file" Click="OnShowFile" ToolTipService.ToolTip="Open the selected clip's folder in File Explorer">
+                    <AppBarButton.Icon><FontIcon Glyph="&#xE838;" /></AppBarButton.Icon>
+                </AppBarButton>
+                <AppBarButton Label="Refresh" Click="OnRefresh">
+                    <AppBarButton.Icon><FontIcon Glyph="&#xE72C;" /></AppBarButton.Icon>
+                </AppBarButton>
+            </CommandBar>
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <ProgressRing x:Name="BusyRing" Width="16" Height="16" IsActive="False" Visibility="Collapsed" />
+                <TextBlock Text="{x:Bind Vm.Count, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </Grid>
+
+        <ListView Grid.Row="4" x:Name="List" ItemsSource="{x:Bind Vm.Items}" SelectionMode="Single"
+                  AutomationProperties.Name="Log" Visibility="{x:Bind h:Ui.Hide(Vm.IsEmpty), Mode=OneWay}">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:LogItem">
+                    <Grid ColumnSpacing="14" Padding="0,8" ToolTipService.ToolTip="{x:Bind Tip}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="24" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="120" />
+                            <ColumnDefinition Width="150" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE8AC;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                  Visibility="{x:Bind h:Ui.Show(Renamed)}" />
+                        <FontIcon Glyph="&#xE930;" FontSize="16" Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                  Visibility="{x:Bind h:Ui.Show(Uploaded)}" />
+                        <FontIcon Glyph="&#xEA39;" FontSize="16" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                  Visibility="{x:Bind h:Ui.Show(Failed)}" />
+                        <FontIcon Glyph="&#xE7A7;" FontSize="16" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                  Visibility="{x:Bind h:Ui.Show(Undone)}" />
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{x:Bind Detail}" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="{x:Bind Status}" />
+                            <TextBlock Text="{x:Bind Run}" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="3" Text="{x:Bind When}" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <StackPanel Grid.Row="4" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12"
+                    Visibility="{x:Bind h:Ui.Show(Vm.IsEmpty), Mode=OneWay}">
+            <FontIcon Glyph="&#xE81C;" FontSize="40" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            <TextBlock Text="Nothing in the log yet" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
+            <TextBlock Text="Every file the app renames is recorded here." Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</Page>

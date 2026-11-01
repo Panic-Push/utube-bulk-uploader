@@ -1,0 +1,78 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Run core tests
+        shell: pwsh
+        run: ./ci/run.ps1 -Title "Core tests" -Command "dotnet test tests/UTubeBulkUploader.Tests -c Release"
+
+      - name: Publish app
+        if: success() || failure()     # build even when tests fail, so both sets of problems show up at once
+        shell: pwsh
+        # Visual Studio's MSBuild: it carries the WinUI resource (PRI) tools that the plain dotnet CLI lacks.
+        run: ./ci/run.ps1 -Title "Build app" -Command "msbuild src/UTubeBulkUploader.App/UTubeBulkUploader.App.csproj -restore -t:Publish -p:Configuration=Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:Version=1.0.${{ github.run_number }} -p:PublishDir=$((Resolve-Path .).Path)\publish\ -nologo -v:minimal"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          ./ci/run.ps1 -Title "Installer" -Command "& '$iscc' /DAppVersion=1.0.${{ github.run_number }} /DSourceDir=..\publish installer\UTubeBulkUploader.iss"
+
+
+      - name: Install and open the app (smoke test)
+        id: smoke
+        shell: pwsh
+        run: ./ci/smoke.ps1
+
+      - name: Share screenshots on the ci-screens branch
+        if: always() && steps.smoke.outcome != 'skipped'
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:RUNNER_TEMP 'screens'
+          if (-not (Test-Path $src)) { exit 0 }
+          $dir = Join-Path $env:RUNNER_TEMP 'screens-repo'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item "$src\*.png" $dir
+          Set-Location $dir
+          git init -q -b ci-screens
+          git config user.name "ci"; git config user.email "ci@users.noreply.github.com"
+          "Run ${{ github.run_number }} (${{ github.sha }})" | Out-File README.md
+          git add -A; git commit -q -m "Screenshots from run ${{ github.run_number }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-screens
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UTubeBulkUploader-Setup-1.0.${{ github.run_number }}
+          path: installer/Output/UTubeBulkUploader-Setup.exe
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v1.0.${{ github.run_number }}"
+          gh release create $tag installer/Output/UTubeBulkUploader-Setup.exe `
+            --title "UTube Bulk Uploader 1.0.${{ github.run_number }}" `
+            --notes "Download UTubeBulkUploader-Setup.exe below and run it." --latest
