@@ -53,8 +53,8 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <FontIcon Glyph="&#xE916;" FontSize="18" />
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="Seconds per video" />
-                    <TextBlock Text="Night mode starts a new video at most this often (45 by default). Files keep uploading in the background, up to 3 at a time." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock Text="Minimum seconds per video" />
+                    <TextBlock Text="Night mode spends at least this long on each video (45 by default), even if Studio is faster." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
                 <NumberBox Grid.Column="2" x:Name="Gap" Minimum="20" Maximum="600" SpinButtonPlacementMode="Inline" Width="130" ValueChanged="OnGapChanged" />
             </Grid>

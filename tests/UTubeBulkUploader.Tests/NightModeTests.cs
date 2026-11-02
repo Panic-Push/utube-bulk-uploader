@@ -91,12 +91,12 @@ public class NightPracticeTests
 {
     private sealed record Saved(int n, string file, string title, string description, bool notForKids, bool @private, string link, bool completed);
 
-    private sealed record Outcome(BatchResult Result, LogStore Log, TempDir Dir, List<Saved> Saved, int Loads, int MaxConcurrent) : IDisposable
+    private sealed record Outcome(BatchResult Result, LogStore Log, TempDir Dir, List<Saved> Saved, int Loads) : IDisposable
     {
         public void Dispose() => Dir.Dispose();
     }
 
-    private static async Task<Outcome?> Run(int clips, string query, Func<NightRunner>? runner = null, Action<LogStore>? prepare = null)
+    private static async Task<Outcome?> Run(int clips, string query, int refreshEvery = 20, TimeSpan? cutoff = null, Action<LogStore>? prepare = null)
     {
         var chrome = ChromeLauncher.FindChrome(Environment.GetEnvironmentVariable("UBU_CHROME"));
         if (chrome is null) return null;
@@ -116,61 +116,67 @@ public class NightPracticeTests
         var driver = new StudioDriver(tab, StudioTarget.PracticePage(query))
         {
             ClickPause = TimeSpan.FromMilliseconds(150), StepTimeout = TimeSpan.FromSeconds(10), ScreenshotDir = t.Root,
+            MinPerVideo = TimeSpan.Zero, UploadCutoff = cutoff ?? TimeSpan.FromSeconds(30),
         };
         await driver.InitAsync(CancellationToken.None);
-        var r = runner?.Invoke() ?? new NightRunner();
-        r = new NightRunner
-        {
-            PerVideo = runner is null ? TimeSpan.FromSeconds(1) : r.PerVideo, MaxUploading = r.MaxUploading, RefreshEvery = r.RefreshEvery,
-            UploadTimeout = runner is null ? TimeSpan.FromSeconds(30) : r.UploadTimeout, NotSeenAfter = TimeSpan.FromSeconds(8),
-            PollInterval = TimeSpan.FromMilliseconds(400), UploadDate = new DateTime(2026, 11, 1),
-        };
-        var result = await r.RunAsync(driver, log, CancellationToken.None);
+        var runner = new NightRunner { RefreshEvery = refreshEvery, UploadDate = new DateTime(2026, 11, 1) };
+        var result = await runner.RunAsync(driver, log, CancellationToken.None);
         var saved = JsonSerializer.Deserialize<List<Saved>>((string?)await tab.EvalAsync("localStorage.getItem('ubu-saved') || '[]'") ?? "[]")!;
         var loads = (int)double.Parse((string?)await tab.EvalAsync("localStorage.getItem('ubu-loads') || '0'") ?? "0");
-        var max = (int)double.Parse((string?)await tab.EvalAsync("localStorage.getItem('ubu-maxConcurrent') || '0'") ?? "0");
         try { await tab.SendAsync("Browser.close"); } catch (Exception) { }
-        return new Outcome(result, log, t, saved, loads, max);
+        return new Outcome(result, log, t, saved, loads);
     }
 
     [Fact]
-    public async Task EachVideoIsSavedPrivateWithTitleAndDescriptionThenUploaded()
+    public async Task EachVideoUploadsFullyThenIsSavedPrivateWithTitleAndDescription()
     {
-        using var o = await Run(5, "speed=1", () => new NightRunner { RefreshEvery = 3 });
+        using var o = await Run(4, "speed=1", refreshEvery: 2);
         if (o is null) return;
         Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
-        Assert.Equal(5, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
+        Assert.Equal(4, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
         Assert.All(o.Log.Rows, r => Assert.Contains("https://youtu.be/TEST", r.Note));
-        Assert.Equal(5, o.Saved.Count);
+        Assert.Equal(4, o.Saved.Count);
+        Assert.All(o.Saved, s => Assert.True(s.completed, "saved before its upload was complete"));
         var first = o.Saved.Single(s => s.file == "Story - Cam 1 - 1 (30.10.26)");
-        Assert.Equal("Story - Cam 1 - 1 (30.10.26)", first.title);   // punctuation kept
+        Assert.Equal("Story - Cam 1 - 1 (30.10.26)", first.title);
         Assert.Equal("File Name: Story - Cam 1 - 1 (30.10.26), Upload Date: 01.11.26", first.description);
         Assert.All(o.Saved, s => { Assert.True(s.notForKids); Assert.True(s.@private); });
-        Assert.True(o.Loads >= 2, "Studio should have been refreshed after 3 videos");
+        Assert.True(o.Loads >= 2, "Studio should have been refreshed after 2 videos");
     }
 
     [Fact]
-    public async Task NeverMoreThanThreeUploadingAtOnce()
-    {
-        using var o = await Run(6, "speed=20", () => new NightRunner { PerVideo = TimeSpan.FromMilliseconds(100) });
-        if (o is null) return;
-        Assert.Equal(BatchOutcome.Done, o.Result.Outcome);
-        Assert.Equal(6, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
-        Assert.True(o.MaxConcurrent <= 4, $"max at once was {o.MaxConcurrent}");   // 3 saved + the one being filled in
-        Assert.True(o.MaxConcurrent >= 3, $"max at once was {o.MaxConcurrent}");
-    }
-
-    [Fact]
-    public async Task AFailedUploadIsRecordedAsABrokenEntryAndTheRestCarryOn()
+    public async Task AFailedUploadIsRecordedAndTheRestCarryOn()
     {
         using var o = await Run(3, "speed=1&fail=2");
         if (o is null) return;
-        Assert.Equal(BatchOutcome.Done, o.Result.Outcome);
+        Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
         Assert.Equal(2, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
         var failed = Assert.Single(o.Log.Rows, x => x.Status == LogStatus.Failed);
         Assert.Contains("Network error", failed.Note);
-        Assert.Contains("broken entry", failed.Note);
-        Assert.Equal("fp2", BatchPlanner.Plan(o.Log, 15, out var _m).Single().Rows.Single().Fingerprint);   // tried again next run
+        Assert.Equal("fp2", BatchPlanner.Plan(o.Log, 15, out var _m).Single().Rows.Single().Fingerprint);
+    }
+
+    [Fact]
+    public async Task ACutOffVideoIsSavedAnywayAndTheNextOneStarts()
+    {
+        using var o = await Run(3, "speed=1&stuck=2", cutoff: TimeSpan.FromSeconds(15));
+        if (o is null) return;
+        Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
+        Assert.Equal(2, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
+        var cut = Assert.Single(o.Log.Rows, x => x.Status == LogStatus.Failed);
+        Assert.Equal("fp2", cut.Fingerprint);
+        Assert.Contains("cut-off", cut.Note);
+        Assert.Equal(3, o.Saved.Count);   // saved anyway
+    }
+
+    [Fact]
+    public async Task ThreeCutOffsInARowStopTheNight()
+    {
+        using var o = await Run(5, "speed=1&stuck=all", cutoff: TimeSpan.FromSeconds(4));
+        if (o is null) return;
+        Assert.Equal(BatchOutcome.TimedOut, o.Result.Outcome);
+        Assert.Equal(3, o.Log.Rows.Count(x => x.Status == LogStatus.Failed));
+        Assert.Equal(2, o.Log.Rows.Count(x => x.Status == LogStatus.Renamed));
     }
 
     [Fact]
@@ -185,22 +191,11 @@ public class NightPracticeTests
     }
 
     [Fact]
-    public async Task AnUploadThatNeverFinishesStopsTheRun()
-    {
-        using var o = await Run(2, "speed=1&stuck=1", () => new NightRunner { UploadTimeout = TimeSpan.FromSeconds(6) });
-        if (o is null) return;
-        Assert.Equal(BatchOutcome.TimedOut, o.Result.Outcome);
-        Assert.Equal(0, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
-        Assert.Contains(o.Log.Rows, x => x.Status == LogStatus.Failed && x.Note.Contains("broken entry"));
-    }
-
-    [Fact]
     public async Task ClipsLeftUploadingByAnEarlierRunAreTriedAgain()
     {
         using var o = await Run(1, "speed=1", prepare: log => log.Rows[0].Status = LogStatus.Uploading);
         if (o is null) return;
-        Assert.Equal(BatchOutcome.Done, o.Result.Outcome);
-        var row = Assert.Single(o.Log.Rows);
-        Assert.Equal(LogStatus.Uploaded, row.Status);
+        Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
+        Assert.Equal(LogStatus.Uploaded, Assert.Single(o.Log.Rows).Status);
     }
 }

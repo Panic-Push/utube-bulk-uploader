@@ -36,12 +36,12 @@
   // made for kids) → Next ×3 → Visibility (Private) → Save. The file keeps uploading in the corner box
   // ("Uploading 40% ..." → "100% uploaded") after Save; reloading the page loses uploads in progress.
   // Options: ?speed=seconds-per-file  &limit=files-allowed-today  &fail=N (the Nth file's upload fails)
-  //          &stuck=1 (uploads never finish)
+  //          &stuck=all (no upload ever finishes) or &stuck=N (the Nth file never finishes)
   const q = new URLSearchParams(location.search);
   const speed = Number(q.get('speed') || 3);
   const limit = q.get('limit') ? Number(q.get('limit')) : null;
   const failAt = q.get('fail') ? Number(q.get('fail')) : null;
-  const stuck = q.get('stuck') === '1';
+  const stuckParam = q.get('stuck');
   const store = {
     get: (k, d) => { try { return JSON.parse(localStorage.getItem('ubu-' + k)) ?? d; } catch { return d; } },
     set: (k, v) => localStorage.setItem('ubu-' + k, JSON.stringify(v)),
@@ -184,7 +184,7 @@
       active++;
       store.set('maxConcurrent', Math.max(store.get('maxConcurrent', 0), active));
       const tick = setInterval(() => {
-        if (stuck && up.pct >= 80) return;
+        if ((stuckParam === 'all' || Number(stuckParam) === n) && up.pct >= 80) return;
         if (failAt === n && up.pct >= 60) { clearInterval(tick); up.failed = true; active--; this.show(up); return; }
         up.pct = Math.min(100, up.pct + 20);
         if (up.pct >= 100) { clearInterval(tick); up.done = true; active--; this.markDone(up); }

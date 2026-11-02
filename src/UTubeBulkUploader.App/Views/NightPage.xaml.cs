@@ -46,7 +46,7 @@ public sealed partial class NightPage : Page, IActivatable
         var batches = BatchPlanner.Plan(_host.LogFile, _host.Settings.BatchSize, out _);
         var clips = batches.Sum(b => b.Rows.Count);
         Summary.Text = clips == 0 ? "Nothing waiting: rename clips first."
-            : $"{Format.Count(clips, "clip")} waiting · one video every {_host.Settings.SecondsPerVideo} s, up to 3 uploading at once";
+            : $"{Format.Count(clips, "clip")} waiting · one video at a time, at least {_host.Settings.SecondsPerVideo} s each";
         StartButton.IsEnabled = !Running && clips > 0;
         StatToday.Text = BatchPlanner.UploadedToday(_host.LogFile).ToString();
         StatLeft.Text = clips.ToString();
@@ -110,7 +110,8 @@ public sealed partial class NightPage : Page, IActivatable
         if (!await Ui.Confirm(XamlRoot, "Start real uploads?",
                 "Night mode will upload the waiting clips one by one to the YouTube channel signed in to its Chrome window: " +
                 "title from the file name, description with the file name and today's date, not made for kids, Private. " +
-                $"A new video every {_host.Settings.SecondsPerVideo} seconds, up to 3 uploading at once, until everything is done or Studio says stop.\n\n" +
+                "Each video is saved only once its upload is complete; one still not uploaded after 12 minutes is saved anyway and night mode moves on " +
+                "(3 like that in a row stop the night).\n\n" +
                 "Don't use that Chrome window while it runs. Keep this PC awake and connected.", "Start")) return;
 
         _cts = new CancellationTokenSource();
@@ -138,9 +139,9 @@ public sealed partial class NightPage : Page, IActivatable
             var port = await ChromeLauncher.EnsureRunningAsync(chrome, ChromeLauncher.ProfileDir, target.HomeUrl, ct);
             await using var tab = await CdpTab.ConnectAsync(port, ct);
             await tab.SendAsync("Page.bringToFront", ct: ct);
-            var driver = new StudioDriver(tab, target);
+            var driver = new StudioDriver(tab, target) { MinPerVideo = TimeSpan.FromSeconds(_host.Settings.SecondsPerVideo) };
             await driver.InitAsync(ct);
-            var runner = new NightRunner { PerVideo = TimeSpan.FromSeconds(_host.Settings.SecondsPerVideo) };
+            var runner = new NightRunner();
             _runner = runner;
             runner.Activity += Add;
             runner.Progress += p => _host.Ui(() => ShowProgress(p));
@@ -172,23 +173,23 @@ public sealed partial class NightPage : Page, IActivatable
     {
         if (!_finishing && _runner is not null)
         {
-            // First press: no new videos; let the ones uploading finish so they aren't left broken.
+            // First press: finish the video in progress so it isn't left broken.
             _finishing = true;
             _runner.FinishAndStop();
             StopLabel.Text = "Stop now";
             StatusTitle.Text = "Finishing uploads in progress…";
-            Add("Stop requested: no new videos. Waiting for the uploads in progress to finish. Press Stop now to stop at once.");
+            Add("Stop requested: finishing the video in progress, then stopping. Press Stop now to stop at once.");
             return;
         }
         StopButton.IsEnabled = false;
         StatusTitle.Text = "Stopping…";
-        Add("Stopping now. Videos still uploading keep going in Chrome if it stays open; they're checked next run.");
+        Add("Stopping now. The video in progress will be uploaded again next run.");
         _cts?.Cancel();
     }
 
     private void ShowProgress(NightProgress p)
     {
-        if (!_finishing) StatusTitle.Text = p.Uploading == 0 ? "Working" : $"{p.Uploading} uploading";
+        if (!_finishing) StatusTitle.Text = p.Uploading == 0 ? "Working" : "Uploading";
         StatusDetail.Text = p.Status;
         var total = Math.Max(1, p.Uploaded + p.Failed + p.Uploading + p.Waiting);
         Bar.Maximum = total;
@@ -217,7 +218,7 @@ public sealed partial class NightPage : Page, IActivatable
             BatchOutcome.Done => (InfoBarSeverity.Success, "Finished", "Finished"),
             BatchOutcome.StudioLimit => (InfoBarSeverity.Warning, "Studio said stop", "Stopped: Studio's limit"),
             BatchOutcome.SignedOut => (InfoBarSeverity.Error, "Sign-in needed", "Stopped: signed out"),
-            BatchOutcome.TimedOut => (InfoBarSeverity.Warning, "An upload took too long", "Stopped: upload too slow"),
+            BatchOutcome.TimedOut => (InfoBarSeverity.Warning, "Uploads too slow", "Stopped: 3 uploads in a row too slow"),
             BatchOutcome.Stopped => (InfoBarSeverity.Informational, "Stopped", "Stopped"),
             _ => (InfoBarSeverity.Error, "Night mode stopped", "Stopped: something unexpected"),
         };

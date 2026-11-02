@@ -60,19 +60,24 @@ and uploads the waiting clips **one by one**, the way a person would: Create →
 - **Audience:** No, it's not made for kids
 - **Visibility:** Private → **Save**
 
-The file keeps uploading in the background while the next video starts: a new video every **45 seconds**
-(Settings), never more than **3 uploading at once**. A clip is marked **Uploaded** in the log (with its YouTube link)
-only when Studio's upload box shows it **100% uploaded**. Studio is refreshed every 20 videos, only when nothing is
-uploading (a refresh would cut uploads off). The Night mode screen counts uploads this run and today.
+Night mode stays on the details screen until Studio's progress line says **Upload complete**, then saves, marks the
+clip **Uploaded** in the log (with its YouTube link) and starts the next video: one at a time, at least 45 seconds
+each (Settings). A file still not uploaded after **12 minutes** is saved anyway, marked Failed (with a note to check
+it on YouTube) and uploaded again next run; **3 such cut-offs in a row** stop the night. Studio is refreshed every
+20 videos. The Night mode screen counts uploads this run and today.
 
 Before the first video it checks that Studio opens signed in and in English, and keeps the PC awake.
 
 It stops by itself and says why, with a screenshot and the page's text, when Studio shows a limit message, when Chrome
-is signed out, when a file takes over 20 minutes to upload, or when a screen isn't what it expects.
-**Stop** first finishes the uploads in progress; **Stop now** stops at once.
+is signed out, or when a screen isn't what it expects. **Stop** first finishes the video in progress; **Stop now**
+stops at once.
 
-If an upload fails after its video was saved, a broken entry is left on YouTube: the log says so (with the link) and
-the clip is uploaded again on the next run.
+If Studio says an upload failed, the video is still saved, so a broken entry is left on YouTube: the log says so
+(with the link) and the clip is uploaded again on the next run.
+
+Testing with the same clips again: the app recognises a clip by its content, not its name, so copies of one video
+count as one clip, and renamed clips stay "already done". Undo the run on the Log page first, or delete the log and
+the `log-backup-*.csv` file in `%LOCALAPPDATA%\UTube Bulk Uploader` for a fresh start.
 
 First time: Night mode → **Sign in** → sign in to the channel's Google account in the Chrome window that opens, then close that window. (It opens as ordinary Chrome because Google refuses sign-in in a browser a program controls; night mode reopens it itself.) Try a small batch first.
 

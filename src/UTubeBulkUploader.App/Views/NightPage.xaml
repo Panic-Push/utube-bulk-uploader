@@ -13,7 +13,7 @@
             </StackPanel>
 
             <InfoBar IsOpen="True" IsClosable="True" Severity="Informational"
-                     Message="Night mode opens YouTube Studio in its own Chrome window and uploads the waiting clips one by one, like a person would: Create, Upload videos, title (the file name), description (file name and upload date), not made for kids, Private, Save. A new video starts every 45 seconds while earlier files keep uploading in the background, up to 3 at a time. A clip is marked uploaded only when Studio shows it 100% uploaded. It stops by itself when Studio says to stop, when it's signed out, or when anything looks unexpected." />
+                     Message="Night mode opens YouTube Studio in its own Chrome window and uploads the waiting clips one at a time, like a person would: Create, Upload videos, title (the file name), description (file name and upload date), not made for kids, Private. It waits on the details screen until Studio says Upload complete, then saves and moves on. A video still not uploaded after 12 minutes is saved anyway and tried again next run; 3 in a row stop the night. It also stops when Studio says to stop, when it's signed out, or when anything looks unexpected." />
 
             <!-- Chrome -->
             <Border Style="{StaticResource CardStyle}">

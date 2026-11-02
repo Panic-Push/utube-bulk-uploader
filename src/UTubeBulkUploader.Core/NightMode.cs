@@ -31,8 +31,10 @@ public sealed class StudioTarget
 }
 
 /// <summary>What happened when night mode tried to put one video on YouTube.</summary>
+/// <param name="Saved">Studio saved the video (title, description, audience, Private).</param>
+/// <param name="Upload">Whether the file finished uploading before Save: Uploaded, Failed (Studio said so), or Unknown (cut-off).</param>
 public sealed record VideoStart(bool Saved, string Message, string? Link = null, bool FileHandedOver = false,
-    BatchOutcome Stop = BatchOutcome.Error, string? ScreenshotPath = null);
+    BatchOutcome Stop = BatchOutcome.Error, string? ScreenshotPath = null, UploadState Upload = UploadState.Unknown, bool CutOff = false);
 
 /// <summary>Where a saved video's upload stands, read from Studio's upload box.</summary>
 public enum UploadState { Unknown, Uploading, Uploaded, Failed }
@@ -65,6 +67,10 @@ public sealed class StudioDriver
 
     /// <summary>How long one screen of Studio may take to appear.</summary>
     public TimeSpan StepTimeout { get; init; } = TimeSpan.FromSeconds(45);
+    /// <summary>A file not finished uploading after this long is saved anyway and night mode moves on.</summary>
+    public TimeSpan UploadCutoff { get; init; } = TimeSpan.FromMinutes(12);
+    /// <summary>Each video takes at least this long, however fast Studio is.</summary>
+    public TimeSpan MinPerVideo { get; init; } = TimeSpan.FromSeconds(45);
     /// <summary>Short pause after each click so Studio can react, as a person would.</summary>
     public TimeSpan ClickPause { get; init; } = TimeSpan.FromMilliseconds(1200);
     public string ScreenshotDir { get; init; } = Path.Combine(AppPaths.StateDir, "night-screens");
@@ -151,6 +157,9 @@ public sealed class StudioDriver
         const __radio = (name, words) => { const all = __all().filter(__vis);
             return all.find(e => e.getAttribute('name') === name && (e.getAttribute('role') === 'radio' || /RADIO/.test(e.tagName)))
                 || all.find(e => (e.getAttribute('role') === 'radio' || /RADIO-BUTTON/.test(e.tagName)) && words.some(w => __txt(e).toLowerCase().startsWith(w))); };
+        const __dialog = () => __all().find(e => /UPLOADS-DIALOG/.test(e.tagName) && __vis(e)) || (() => {
+            const b = __all().find(e => (e.id === 'done-button' || e.id === 'next-button') && __vis(e)); if (!b) return null;
+            let d = b; for (let i = 0; i < 40 && d; i++) { d = __up(d); if (d && /DIALOG/.test(d.tagName || '')) return d; } return null; })();
         const __checked = e => !!e && (e.getAttribute('aria-checked') === 'true' || e.hasAttribute('checked') || e.checked === true);
         """;
 
@@ -275,6 +284,7 @@ public sealed class StudioDriver
             if (objectId is null) return await Fail("Studio's file picker disappeared.", "no file picker", handedOver, ct);
             await _tab.SendAsync("DOM.setFileInputFiles", new { files = new[] { path }, objectId }, ct);
             handedOver = true;
+            var started = Stopwatch.StartNew();
 
             // 3. Details screen: title and description. (Chrome tells Studio about the file itself; only if
             // nothing happens is the "file chosen" signal sent again, so a file is never handed over twice.)
@@ -329,7 +339,16 @@ public sealed class StudioDriver
                 return m ? m[0] : null;
                 """, ct);
 
-            // 7. Save, then close any "still uploading" / "video saved" notice
+            // 7. Stay on the details screen until its progress line says the upload is complete.
+            var (upload, uploadNote) = await WaitForUploadAsync(title, started, ct);
+            if (upload == UploadState.Unknown && _stopSign is { } stopSign)
+                return new VideoStart(false, stopSign.Message, link, handedOver, stopSign.Outcome, stopSign.ScreenshotPath);
+            var cutOff = upload == UploadState.Unknown;
+            string? cutShot = cutOff ? await CaptureAsync("upload cut-off", ct) : null;
+            var left = MinPerVideo - started.Elapsed;
+            if (left > TimeSpan.Zero) { Status?.Invoke($"{title}: uploaded, saving shortly"); await Task.Delay(left, ct); }
+
+            // 8. Save, then close any "still uploading" / "video saved" notice
             Status?.Invoke($"{title}: saving");
             if (!await JsBool("const b = __button(['done-button'], ['save', 'publish']); if (!b) return false; b.click(); return true;", ct))
                 return await Fail("Couldn't find the Save button.", "no save button", handedOver, ct);
@@ -338,15 +357,20 @@ public sealed class StudioDriver
             var sw = Stopwatch.StartNew();
             while (sw.Elapsed < StepTimeout)
             {
-                await Js("const b = __button(['close-button', 'close-icon-button'], ['close', 'got it', 'ok']); if (b && !__titleBox()) { b.click(); return true; } return false;", ct);
-                if (!await JsBool("return !!__titleBox();", ct)) { closed = true; break; }
+                if (!await JsBool("return !!__dialog();", ct)) { closed = true; break; }
                 await Task.Delay(700, ct);
             }
             if (!closed) return await Fail("Studio didn't confirm the save (the details screen stayed open).", "not saved", handedOver, ct);
             await Task.Delay(1500, ct);
             await Js("const b = __button(['close-button', 'close-icon-button'], ['close', 'got it']); if (b) b.click(); return true;", ct);
 
-            return new VideoStart(true, "Saved as Private.", link, handedOver);
+            return upload switch
+            {
+                UploadState.Uploaded => new VideoStart(true, "Uploaded and saved as Private.", link, handedOver, Upload: UploadState.Uploaded),
+                UploadState.Failed => new VideoStart(true, $"Studio: {uploadNote}", link, handedOver, Upload: UploadState.Failed),
+                _ => new VideoStart(true, $"Not uploaded after {UploadCutoff.TotalMinutes:0} minutes; saved anyway and moved on.", link, handedOver,
+                    ScreenshotPath: cutShot, Upload: UploadState.Unknown, CutOff: true),
+            };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -356,6 +380,40 @@ public sealed class StudioDriver
         {
             return new VideoStart(false, ex.Message, FileHandedOver: handedOver, ScreenshotPath: _tab.Closed ? null : await CaptureAsync("error"));
         }
+    }
+
+    private BatchResult? _stopSign;
+
+    // The details screen's own progress line, e.g. "Uploading 45% ... 2 minutes left" then
+    // "Upload complete ... Processing will begin shortly" (or "Checks complete", "Processing up to HD").
+    private const string ProgressScript = """
+        const d = __dialog(); if (!d) return '';
+        const text = __ctext(d).replace(/\s+/g, ' ');
+        const m = text.match(/(upload(ing)? complete|upload failed[^.]*|uploading \d{1,3}\s?%[^.]*|\d{1,3}\s?% uploaded|processing (will begin|up to|\d)[^.]*|checks? complete|processing abandoned[^.]*|upload (was )?cancell?ed)/i);
+        return m ? m[0] : '';
+        """;
+
+    private static readonly Regex DoneLine = new(@"upload(ing)? complete|100\s?% uploaded|processing (will begin|up to|\d)|checks? complete", RegexOptions.IgnoreCase);
+    private static readonly Regex FailLine = new(@"fail|abandon|cancell?ed|reject|error", RegexOptions.IgnoreCase);
+
+    private async Task<(UploadState, string)> WaitForUploadAsync(string title, Stopwatch started, CancellationToken ct)
+    {
+        _stopSign = null;
+        var lastCheck = TimeSpan.Zero;
+        for (var first = true; first || started.Elapsed < UploadCutoff; first = false)
+        {
+            var line = (string?)await Js(ProgressScript, ct) ?? "";
+            if (FailLine.IsMatch(line)) return (UploadState.Failed, line.Trim());
+            if (DoneLine.IsMatch(line)) return (UploadState.Uploaded, "");
+            Status?.Invoke($"{title}: {(line.Length > 0 ? line.Trim() : "uploading")} · {(int)started.Elapsed.TotalMinutes} min");
+            if (started.Elapsed - lastCheck > TimeSpan.FromSeconds(20))
+            {
+                lastCheck = started.Elapsed;
+                if (await CheckStopSignsAsync(ct) is { } sign) { _stopSign = sign; return (UploadState.Unknown, ""); }
+            }
+            await Task.Delay(2000, ct);
+        }
+        return (UploadState.Unknown, "");
     }
 
     private async Task<VideoStart> Fail(string message, string shot, bool handedOver, CancellationToken ct) =>
@@ -468,20 +526,14 @@ public sealed class StudioDriver
 public sealed record NightProgress(string Status, int Uploaded, int Failed, int Uploading, int Waiting, DateTime? NextVideoAt = null);
 
 /// <summary>
-/// Uploads the waiting clips one by one: a new video at most every <see cref="PerVideo"/>, never more than
-/// <see cref="MaxUploading"/> still uploading, and a page refresh every <see cref="RefreshEvery"/> videos once
-/// nothing is uploading. Each clip is logged on its own: Uploading (saved, file still going up), Uploaded, or Failed.
+/// Uploads the waiting clips one at a time. Each video stays on Studio's details screen until its upload is complete,
+/// then is saved (Private) and marked Uploaded. A file not finished after the cut-off is saved anyway, marked Failed
+/// and tried again next run; <see cref="MaxCutoffsInARow"/> cut-offs in a row stop the night.
 /// </summary>
 public sealed class NightRunner
 {
-    public TimeSpan PerVideo { get; init; } = TimeSpan.FromSeconds(45);
-    public int MaxUploading { get; init; } = 3;
+    public int MaxCutoffsInARow { get; init; } = 3;
     public int RefreshEvery { get; init; } = 20;
-    /// <summary>A file still uploading after this long is given up on.</summary>
-    public TimeSpan UploadTimeout { get; init; } = TimeSpan.FromMinutes(20);
-    /// <summary>A saved video Studio's box doesn't show for this long, with no upload traffic, stops the run.</summary>
-    public TimeSpan NotSeenAfter { get; init; } = TimeSpan.FromMinutes(3);
-    public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(3);
     public DateTime UploadDate { get; init; } = DateTime.Today;
 
     public event Action<NightProgress>? Progress;
@@ -491,17 +543,8 @@ public sealed class NightRunner
 
     private volatile bool _finishing;
 
-    /// <summary>Stop starting new videos; finish the ones uploading, then stop.</summary>
+    /// <summary>Finish the video in progress, then stop.</summary>
     public void FinishAndStop() => _finishing = true;
-
-    private sealed class InFlight
-    {
-        public required LogRow Row { get; init; }
-        public required string Title { get; init; }
-        public string? Link { get; init; }
-        public DateTime SavedAt { get; init; } = DateTime.UtcNow;
-        public DateTime LastSeen { get; set; } = DateTime.UtcNow;
-    }
 
     public async Task<BatchResult> RunAsync(StudioDriver driver, LogStore log, CancellationToken ct)
     {
@@ -515,141 +558,84 @@ public sealed class NightRunner
             return pre;
         }
 
-        var inFlight = new List<InFlight>();
-        var lastStart = DateTime.MinValue;
+        var cutoffsInARow = 0;
         var sinceRefresh = 0;
-        var refreshPending = false;
-        BatchResult? stop = null;
-        driver.Status += s => Report(s, inFlight.Count, queue.Count);
-
+        LogRow? current = null;
+        driver.Status += s => Report(s, current is null ? 0 : 1, queue.Count);
         try
         {
-            while (queue.Count > 0 || inFlight.Count > 0)
+            while (queue.Count > 0)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_finishing && stop is null) stop = new BatchResult(BatchOutcome.Stopped, "Stopped after finishing the uploads in progress.");
-
-                // 1. Background uploads: mark the finished ones.
-                if (inFlight.Count > 0) await CheckUploadsAsync(driver, log, inFlight, ct, s => stop ??= s);
-
-                // 2. Signed out or Studio's limit: stop starting new videos.
-                if (stop is null && await driver.CheckStopSignsAsync(ct) is { } sign) stop = sign;
-
-                // 3. Refresh every 20 videos, only when nothing is uploading.
-                if (refreshPending && inFlight.Count == 0 && stop is null)
+                if (_finishing) return new BatchResult(BatchOutcome.Stopped, "Stopped.");
+                if (sinceRefresh >= RefreshEvery)
                 {
                     Report("Refreshing YouTube Studio", 0, queue.Count);
-                    if (await driver.GoHomeAsync(ct) is { } h) stop = h;
-                    refreshPending = false;
+                    if (await driver.GoHomeAsync(ct) is { } h) return h;
                     sinceRefresh = 0;
                 }
 
-                // 4. Start the next video when it's time and there's room.
-                var due = lastStart + PerVideo;
-                if (stop is null && !refreshPending && queue.Count > 0 && inFlight.Count < MaxUploading && DateTime.UtcNow >= due)
-                {
-                    var row = queue.Dequeue();
-                    lastStart = DateTime.UtcNow;
-                    var title = VideoDetails.Title(row.CurrentPath);
-                    Activity?.Invoke($"Uploading {row.NewName}");
-                    var started = await driver.StartVideoAsync(row.CurrentPath, UploadDate, ct);
-                    if (started.Saved)
-                    {
-                        Mark(log, row, LogStatus.Uploading, $"Saved on YouTube as Private{(started.Link is null ? "" : $": {started.Link}")}. Uploading.");
-                        inFlight.Add(new InFlight { Row = row, Title = title, Link = started.Link });
-                        sinceRefresh++;
-                        if (sinceRefresh >= RefreshEvery) refreshPending = true;
-                    }
-                    else if (started.Stop is BatchOutcome.StudioLimit or BatchOutcome.SignedOut or BatchOutcome.Stopped)
-                    {
-                        stop = new BatchResult(started.Stop, started.Message, started.ScreenshotPath);   // clip stays waiting for next run
-                    }
-                    else
-                    {
-                        Mark(log, row, LogStatus.Failed, started.FileHandedOver
-                            ? $"Night mode: {started.Message} The file was given to Studio, so an unfinished draft may be left on YouTube."
-                            : $"Night mode: {started.Message}");
-                        Failed++;
-                        Activity?.Invoke($"Failed: {row.NewName}. {started.Message}");
-                        stop = new BatchResult(started.Stop == BatchOutcome.Stopped ? BatchOutcome.Stopped : BatchOutcome.Error, started.Message, started.ScreenshotPath);
-                    }
-                    Report(started.Saved ? $"{row.NewName} saved, uploading in the background" : started.Message, inFlight.Count, queue.Count);
-                    continue;
-                }
+                var row = current = queue.Dequeue();
+                Activity?.Invoke($"Uploading {row.NewName}");
+                Mark(log, row, LogStatus.Uploading, "Night mode is uploading this.");
+                var v = await driver.StartVideoAsync(row.CurrentPath, UploadDate, ct);
+                current = null;
+                var link = v.Link is null ? "" : $" {v.Link}";
 
-                if (stop is not null && inFlight.Count == 0) break;
-                if (stop is not null && queue.Count > 0) Report("Finishing the uploads in progress before stopping", inFlight.Count, queue.Count);
-                else if (queue.Count == 0) Report("Waiting for the last uploads to finish", inFlight.Count, 0);
-                else if (inFlight.Count >= MaxUploading) Report($"{MaxUploading} videos uploading; waiting before the next", inFlight.Count, queue.Count);
-                else if (refreshPending) Report("Waiting for uploads to finish before refreshing Studio", inFlight.Count, queue.Count);
-                else Report("Next video soon", inFlight.Count, queue.Count, due.ToLocalTime());
-                await Task.Delay(PollInterval, ct);
+                if (v.Saved && v.Upload == UploadState.Uploaded)
+                {
+                    Mark(log, row, LogStatus.Uploaded, $"Uploaded as Private.{link}");
+                    Uploaded++;
+                    cutoffsInARow = 0;
+                    sinceRefresh++;
+                    Activity?.Invoke($"Uploaded: {row.NewName}");
+                }
+                else if (v.Saved)
+                {
+                    Mark(log, row, LogStatus.Failed, (v.CutOff
+                        ? "Took over the cut-off to upload; saved anyway. Check it on YouTube: if it finished, delete the copy uploaded next run."
+                        : $"{v.Message}. The video was saved, so a broken entry is left on YouTube.") + link);
+                    Failed++;
+                    sinceRefresh++;
+                    Activity?.Invoke($"Failed: {row.NewName}. {v.Message}");
+                    if (v.CutOff && ++cutoffsInARow >= MaxCutoffsInARow)
+                        return new BatchResult(BatchOutcome.TimedOut,
+                            $"{MaxCutoffsInARow} videos in a row didn't finish uploading in time, so night mode stopped for the night. Check the internet connection.",
+                            v.ScreenshotPath);
+                    if (!v.CutOff) cutoffsInARow = 0;
+                }
+                else if (v.Stop is BatchOutcome.StudioLimit or BatchOutcome.SignedOut or BatchOutcome.Stopped)
+                {
+                    Mark(log, row, LogStatus.Renamed, v.FileHandedOver
+                        ? "Night mode stopped while this was being uploaded; an unfinished draft may be on YouTube. It will be uploaded next run."
+                        : "");
+                    Activity?.Invoke(v.Message);
+                    return new BatchResult(v.Stop, v.Message, v.ScreenshotPath);
+                }
+                else
+                {
+                    Mark(log, row, LogStatus.Failed, v.FileHandedOver
+                        ? $"Night mode: {v.Message} An unfinished draft may be left on YouTube."
+                        : $"Night mode: {v.Message}");
+                    Failed++;
+                    Activity?.Invoke($"Failed: {row.NewName}. {v.Message}");
+                    return new BatchResult(BatchOutcome.Error, v.Message, v.ScreenshotPath);
+                }
+                Report($"{row.NewName}: {(v.Upload == UploadState.Uploaded ? "done" : "failed")}", 0, queue.Count);
             }
         }
         catch (OperationCanceledException)
         {
-            foreach (var f in inFlight)
-                Mark(log, f.Row, LogStatus.Uploading, f.Row.Note);   // left as Uploading: checked next run
-            return new BatchResult(BatchOutcome.Stopped, inFlight.Count == 0 ? "Stopped." :
-                $"Stopped. {inFlight.Count} video(s) were still uploading; if Chrome stays open they may finish. The app checks them next run.");
+            if (current is not null)
+                Mark(log, current, LogStatus.Renamed, "Stopped while this was being uploaded; an unfinished draft may be on YouTube. It will be uploaded next run.");
+            return new BatchResult(BatchOutcome.Stopped, "Stopped.");
         }
 
-        if (stop is not null) return stop;
         Report("All done", 0, 0);
         return new BatchResult(BatchOutcome.Done, $"All done: {Uploaded} uploaded" + (Failed > 0 ? $", {Failed} failed (tried again next run)." : "."));
     }
 
-    private async Task CheckUploadsAsync(StudioDriver driver, LogStore log, List<InFlight> inFlight, CancellationToken ct, Action<BatchResult> stop)
-    {
-        var states = await driver.ReadUploadsAsync(inFlight.Select(f => f.Title).ToList(), ct);
-        for (var i = inFlight.Count - 1; i >= 0; i--)
-        {
-            var f = inFlight[i];
-            var (state, note) = states[i];
-            var link = f.Link is null ? "" : $" {f.Link}";
-            if (state == UploadState.Uploaded)
-            {
-                Mark(log, f.Row, LogStatus.Uploaded, $"Uploaded as Private.{link}");
-                Uploaded++;
-                inFlight.RemoveAt(i);
-                Activity?.Invoke($"Uploaded: {f.Row.NewName}");
-                continue;
-            }
-            if (state == UploadState.Failed)
-            {
-                Mark(log, f.Row, LogStatus.Failed, $"Studio: {note}. The video was already saved, so a broken entry is left on YouTube.{link}");
-                Failed++;
-                inFlight.RemoveAt(i);
-                Activity?.Invoke($"Failed: {f.Row.NewName}. {note}");
-                continue;
-            }
-            if (state != UploadState.Unknown) f.LastSeen = DateTime.UtcNow;
-            if (DateTime.UtcNow - f.SavedAt > UploadTimeout)
-            {
-                Mark(log, f.Row, LogStatus.Failed, $"Still not uploaded after {UploadTimeout.TotalMinutes:0} minutes; a broken entry may be left on YouTube.{link}");
-                Failed++;
-                inFlight.RemoveAt(i);
-                Activity?.Invoke($"Failed: {f.Row.NewName} took over {UploadTimeout.TotalMinutes:0} minutes.");
-                stop(new BatchResult(BatchOutcome.TimedOut, $"{f.Row.NewName} took over {UploadTimeout.TotalMinutes:0} minutes to upload, so night mode stopped to be safe.",
-                    await driver.CaptureAsync("too slow", ct)));
-                continue;
-            }
-            if (state == UploadState.Unknown && DateTime.UtcNow - f.LastSeen > NotSeenAfter && !driver.UploadTrafficActive)
-            {
-                // Not in Studio's box and nothing uploading: rather than guess, record it and stop.
-                Mark(log, f.Row, LogStatus.Failed, $"Saved, but Studio's upload box never showed it finishing. Check it on YouTube.{link}");
-                Failed++;
-                inFlight.RemoveAt(i);
-                stop(new BatchResult(BatchOutcome.Error,
-                    $"Studio's upload box doesn't show {f.Row.NewName}, and nothing is uploading. Night mode stopped so nothing is marked wrongly; a screenshot and the page's text were saved.",
-                    await driver.CaptureAsync("upload not shown", ct)));
-            }
-        }
-        Report(inFlight.Count == 0 ? "" : $"{inFlight.Count} uploading: " +
-            string.Join(", ", inFlight.Select((f, k) => $"{f.Row.NewName} {(states.Count > k ? states[k].Note : "")}".Trim())), inFlight.Count, -1);
-    }
-
-    /// <summary>Clips left as "Uploading" by a run that stopped unexpectedly are tried again; the log says why.</summary>
+    /// <summary>Clips left as "Uploading" by a run that ended unexpectedly are tried again; the log says why.</summary>
     private static void RecoverInterrupted(LogStore log)
     {
         var changed = false;
@@ -657,7 +643,7 @@ public sealed class NightRunner
         {
             r.Status = LogStatus.Failed;
             r.StatusTime = DateTime.Now;
-            r.Note = $"{r.Note} Night mode stopped before this finished uploading; a broken entry may be left on YouTube. Uploading it again.".Trim();
+            r.Note = $"{r.Note} Night mode stopped before this finished; an unfinished draft may be on YouTube. Uploading it again.".Trim();
             changed = true;
         }
         if (changed) log.TrySave();
@@ -672,10 +658,9 @@ public sealed class NightRunner
     }
 
     private int _waiting;
-    private void Report(string status, int uploading, int waiting, DateTime? next = null)
+    private void Report(string status, int uploading, int waiting)
     {
         if (waiting >= 0) _waiting = waiting;
-        if (status.Length > 0 || next is not null)
-            Progress?.Invoke(new NightProgress(status, Uploaded, Failed, uploading, _waiting, next));
+        if (status.Length > 0) Progress?.Invoke(new NightProgress(status, Uploaded, Failed, uploading, _waiting));
     }
 }
