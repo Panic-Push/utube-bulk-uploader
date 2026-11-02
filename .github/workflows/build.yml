@@ -22,7 +22,7 @@ jobs:
 
       - name: Run core tests
         shell: pwsh
-        run: ./ci/run.ps1 -Title "Core tests" -Command "dotnet test tests/UTubeBulkUploader.Tests -c Release"
+        run: ./ci/run.ps1 -Title "Core tests" -Command "dotnet test tests/UTubeBulkUploader.Tests -c Release --blame-hang-timeout 20m"
 
       - name: Publish app
         if: success() || failure()     # build even when tests fail, so both sets of problems show up at once

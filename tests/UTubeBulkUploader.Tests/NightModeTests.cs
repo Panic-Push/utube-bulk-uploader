@@ -111,16 +111,21 @@ public class NightPracticeTests
         }
         prepare?.Invoke(log);
         log.Save();
-        var port = await ChromeLauncher.EnsureRunningAsync(chrome, Path.Combine(t.Root, "profile"), "about:blank", CancellationToken.None);
-        await using var tab = await CdpTab.ConnectAsync(port, CancellationToken.None);
+        // A test that hangs fails after 4 minutes with what it was doing, instead of stalling the build.
+        using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+        var port = await ChromeLauncher.EnsureRunningAsync(chrome, Path.Combine(t.Root, "profile"), "about:blank", limit.Token);
+        await using var tab = await CdpTab.ConnectAsync(port, limit.Token);
         var driver = new StudioDriver(tab, StudioTarget.PracticePage(query))
         {
             ClickPause = TimeSpan.FromMilliseconds(150), StepTimeout = TimeSpan.FromSeconds(10), ScreenshotDir = t.Root,
             MinPerVideo = TimeSpan.Zero, UploadCutoff = cutoff ?? TimeSpan.FromSeconds(30),
         };
-        await driver.InitAsync(CancellationToken.None);
+        var lastStatus = "";
+        driver.Status += st => lastStatus = st;
+        await driver.InitAsync(limit.Token);
         var runner = new NightRunner { RefreshEvery = refreshEvery, UploadDate = new DateTime(2026, 11, 1) };
-        var result = await runner.RunAsync(driver, log, CancellationToken.None);
+        var result = await runner.RunAsync(driver, log, limit.Token);
+        if (limit.IsCancellationRequested) result = result with { Message = $"Test ran over 4 minutes. Last status: {lastStatus}" };
         var saved = JsonSerializer.Deserialize<List<Saved>>((string?)await tab.EvalAsync("localStorage.getItem('ubu-saved') || '[]'") ?? "[]")!;
         var loads = (int)double.Parse((string?)await tab.EvalAsync("localStorage.getItem('ubu-loads') || '0'") ?? "0");
         try { await tab.SendAsync("Browser.close"); } catch (Exception) { }
