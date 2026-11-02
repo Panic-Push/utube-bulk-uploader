@@ -46,7 +46,7 @@ public sealed partial class NightPage : Page, IActivatable
         var batches = BatchPlanner.Plan(_host.LogFile, _host.Settings.BatchSize, out _);
         var clips = batches.Sum(b => b.Rows.Count);
         Summary.Text = clips == 0 ? "Nothing waiting: rename clips first."
-            : $"{Format.Count(clips, "clip")} waiting · one video at a time, at least {_host.Settings.SecondsPerVideo} s each";
+            : $"{Format.Count(clips, "clip")} waiting · one video at a time, at least {TimeText.Format(_host.Settings.SecondsPerVideo)} each";
         StartButton.IsEnabled = !Running && clips > 0;
         StatToday.Text = BatchPlanner.UploadedToday(_host.LogFile).ToString();
         StatLeft.Text = clips.ToString();
@@ -110,8 +110,8 @@ public sealed partial class NightPage : Page, IActivatable
         if (!await Ui.Confirm(XamlRoot, "Start real uploads?",
                 "Night mode will upload the waiting clips one by one to the YouTube channel signed in to its Chrome window: " +
                 "title from the file name, description with the file name and today's date, not made for kids, Private. " +
-                "Each video is saved only once its upload is complete; one still not uploaded after 12 minutes is saved anyway and night mode moves on " +
-                "(3 like that in a row stop the night).\n\n" +
+                $"Each video is saved once its upload is complete. An upload that doesn't move for {TimeText.Format(_host.Settings.StuckSeconds)}, or isn't done after 12 minutes, " +
+                "is saved anyway and night mode moves on (3 like that in a row stop the night).\n\n" +
                 "Don't use that Chrome window while it runs. Keep this PC awake and connected.", "Start")) return;
 
         _cts = new CancellationTokenSource();
@@ -139,7 +139,10 @@ public sealed partial class NightPage : Page, IActivatable
             var port = await ChromeLauncher.EnsureRunningAsync(chrome, ChromeLauncher.ProfileDir, target.HomeUrl, ct);
             await using var tab = await CdpTab.ConnectAsync(port, ct);
             await tab.SendAsync("Page.bringToFront", ct: ct);
-            var driver = new StudioDriver(tab, target) { MinPerVideo = TimeSpan.FromSeconds(_host.Settings.SecondsPerVideo) };
+            var driver = new StudioDriver(tab, target) {
+                MinPerVideo = TimeSpan.FromSeconds(_host.Settings.SecondsPerVideo),
+                StuckAfter = TimeSpan.FromSeconds(_host.Settings.StuckSeconds),
+            };
             await driver.InitAsync(ct);
             var runner = new NightRunner();
             _runner = runner;

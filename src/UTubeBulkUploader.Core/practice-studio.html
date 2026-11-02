@@ -18,6 +18,9 @@
   #notice { position: fixed; inset: 0; background: rgba(0,0,0,.3); display: none; align-items: center; justify-content: center; }
   #notice.open { display: flex; }
   #notice div { background: #fff; padding: 24px; border-radius: 12px; }
+  .pdlg { position: fixed; inset: 0; background: rgba(0,0,0,.3); display: none; align-items: center; justify-content: center; }
+  .pdlg.open { display: flex; }
+  .pdlg div { background: #fff; padding: 24px; border-radius: 12px; width: 600px; }
 </style>
 </head>
 <body>
@@ -30,6 +33,7 @@
 <main><h1>Channel content</h1><p>Test page. Uploads here are simulated.</p></main>
 <div class="backdrop" id="backdrop"><ytcp-uploads-dialog id="dialog"></ytcp-uploads-dialog></div>
 <div id="notice"><div><p>Video still uploading. Keep this page open until it's done.</p><ytcp-button id="close-button" role="button">Close</ytcp-button></div></div>
+<div id="processing" class="pdlg"><div><h3>Video processing</h3><p>&nbsp;</p><ytcp-button role="button" class="pclose">Close</ytcp-button></div></div>
 <ytcp-multi-progress-monitor id="monitor"></ytcp-multi-progress-monitor>
 <script>
   // Mirrors YouTube Studio's one-video flow: Create → Upload videos → pick a file → Details (title, description,
@@ -37,11 +41,14 @@
   // ("Uploading 40% ..." → "100% uploaded") after Save; reloading the page loses uploads in progress.
   // Options: ?speed=seconds-per-file  &limit=files-allowed-today  &fail=N (the Nth file's upload fails)
   //          &stuck=all (no upload ever finishes) or &stuck=N (the Nth file never finishes)
+  //          &processing=S (a "Video processing" box appears S seconds after each Save and blocks the page until closed)
   const q = new URLSearchParams(location.search);
   const speed = Number(q.get('speed') || 3);
   const limit = q.get('limit') ? Number(q.get('limit')) : null;
   const failAt = q.get('fail') ? Number(q.get('fail')) : null;
   const stuckParam = q.get('stuck');
+  const processingAfter = q.get('processing') ? Number(q.get('processing')) : null;
+  const blocked = () => document.getElementById('processing').classList.contains('open') || document.getElementById('notice').classList.contains('open');
   const store = {
     get: (k, d) => { try { return JSON.parse(localStorage.getItem('ubu-' + k)) ?? d; } catch { return d; } },
     set: (k, v) => localStorage.setItem('ubu-' + k, JSON.stringify(v)),
@@ -222,17 +229,19 @@
       this.current = null;
       this.reset();
       if (!up.done && !up.failed) document.getElementById('notice').classList.add('open');
+      if (processingAfter !== null) setTimeout(() => document.getElementById('processing').classList.add('open'), processingAfter * 1000);
     }
   }
   customElements.define('ytcp-uploads-dialog', UploadsDialog);
 
-  document.getElementById('create-icon').addEventListener('click', () => document.getElementById('menu').classList.toggle('open'));
+  document.getElementById('create-icon').addEventListener('click', () => { if (!blocked()) document.getElementById('menu').classList.toggle('open'); });
   document.getElementById('text-item-0').addEventListener('click', () => {
     document.getElementById('menu').classList.remove('open');
     document.getElementById('dialog').reset();
     document.getElementById('backdrop').classList.add('open');
   });
   document.getElementById('close-button').addEventListener('click', () => document.getElementById('notice').classList.remove('open'));
+  document.querySelector('#processing .pclose').addEventListener('click', () => document.getElementById('processing').classList.remove('open'));
 </script>
 </body>
 </html>

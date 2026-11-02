@@ -55,7 +55,6 @@ function Run([string]$name, [string[]]$appArgs, [int]$wait = 12) {
 Run 'home' @('--page', 'home') 15
 Run 'home-added' @('--scan', "`"$root\Collector Visit`"", "`"$root\Flood Relief`"") 20
 Run 'preview' @('--scan', "`"$root\Collector Visit`"", "`"$root\Flood Relief`"", '--preview') 20
-Run 'batches' @('--page', 'batches')
 Run 'night' @('--page', 'night')
 Run 'log' @('--page', 'log')
 Run 'settings' @('--page', 'settings')

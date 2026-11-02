@@ -41,9 +41,6 @@
                         <InfoBadge x:Name="PreviewBadge" Visibility="Collapsed" />
                     </NavigationViewItem.InfoBadge>
                 </NavigationViewItem>
-                <NavigationViewItem Content="Batches" Tag="batches">
-                    <NavigationViewItem.Icon><FontIcon Glyph="&#xE8F1;" /></NavigationViewItem.Icon>
-                </NavigationViewItem>
                 <NavigationViewItem Content="Night mode" Tag="night">
                     <NavigationViewItem.Icon><FontIcon Glyph="&#xE708;" /></NavigationViewItem.Icon>
                 </NavigationViewItem>

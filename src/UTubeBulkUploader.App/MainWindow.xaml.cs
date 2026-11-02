@@ -63,7 +63,6 @@ public sealed partial class MainWindow : Window
             page = tag switch
             {
                 "preview" => new PreviewPage(),
-                "batches" => new BatchesPage(),
                 "night" => new NightPage(),
                 "log" => new LogPage(),
                 "settings" => new SettingsPage(),

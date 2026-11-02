@@ -53,10 +53,21 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <FontIcon Glyph="&#xE916;" FontSize="18" />
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="Minimum seconds per video" />
-                    <TextBlock Text="Night mode spends at least this long on each video (45 by default), even if Studio is faster." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock Text="Minimum time per video" />
+                    <TextBlock Text="Night mode spends at least this long on each video, even if Studio is faster. Type minutes:seconds, e.g. 0:45, 1:30 or 10:00 (0:20 to 10:00)." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="PerVideoError" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" Visibility="Collapsed" />
                 </StackPanel>
-                <NumberBox Grid.Column="2" x:Name="Gap" Minimum="20" Maximum="600" SpinButtonPlacementMode="Inline" Width="130" ValueChanged="OnGapChanged" />
+                <TextBox Grid.Column="2" x:Name="PerVideo" Width="110" VerticalAlignment="Center" PlaceholderText="m:ss" TextChanged="OnPerVideoChanged" />
+            </Grid>
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE916;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Stuck upload time" />
+                    <TextBlock Text="If an upload's percentage doesn't move for this long, night mode saves the video anyway, marks it Failed and moves on (it is uploaded again next run). Type minutes:seconds, e.g. 1:30 (0:30 to 12:00)." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="StuckError" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" Visibility="Collapsed" />
+                </StackPanel>
+                <TextBox Grid.Column="2" x:Name="Stuck" Width="110" VerticalAlignment="Center" PlaceholderText="m:ss" TextChanged="OnStuckChanged" />
             </Grid>
             <Grid Style="{StaticResource SettingRow}">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -90,6 +101,16 @@
                     <TextBlock Text="Settings, a backup copy of the log and the technical log (for troubleshooting)." Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
                 <Button Grid.Column="2" Content="Open folder" Click="OnOpenData" />
+            </Grid>
+
+            <Grid Style="{StaticResource SettingRow}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE74D;" FontSize="18" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Forget everything" />
+                    <TextBlock x:Name="ForgetInfo" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Column="2" Content="Forget everything" Click="OnForget" />
             </Grid>
 
             <TextBlock Text="Appearance" Style="{StaticResource SectionHeader}" />

@@ -30,7 +30,16 @@ public sealed partial class SettingsPage : Page, IActivatable
         LogInfo.Text = s.EffectiveLogPath + (string.IsNullOrWhiteSpace(s.LogFilePath) ? " (Desktop)" : "");
         LogDefault.Visibility = Ui.Show(!string.IsNullOrWhiteSpace(s.LogFilePath));
         Theme.SelectedItem = Theme.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == s.Theme) ?? Theme.Items[0];
-        Gap.Value = s.SecondsPerVideo;
+        PerVideo.Text = TimeText.Format(s.SecondsPerVideo);
+        Stuck.Text = TimeText.Format(s.StuckSeconds);
+        PerVideoError.Visibility = Visibility.Collapsed;
+        StuckError.Visibility = Visibility.Collapsed;
+        var remembered = _host.LogFile.Remembered();
+        var onYouTube = remembered.Count(r => r.Status == LogStatus.Uploaded);
+        ForgetInfo.Text = remembered.Count == 0
+            ? "The app doesn't remember any clips right now."
+            : $"The app remembers {Format.Count(remembered.Count, "clip")} ({onYouTube} on YouTube) and won't rename or upload them again. " +
+              "Forget everything makes them all count as new. Nothing is deleted; the log keeps the history.";
         var chrome = ChromeLauncher.FindChrome(s.ChromePath);
         ChromeInfo.Text = chrome is null ? "Not found. Install Google Chrome, or choose chrome.exe." : chrome;
         var v = typeof(App).Assembly.GetName().Version;
@@ -44,10 +53,50 @@ public sealed partial class SettingsPage : Page, IActivatable
         _host.SaveSettings(s => s.ConfirmBeforeRename = Confirm.IsOn);
     }
 
-    private void OnGapChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    private void OnPerVideoChanged(object sender, TextChangedEventArgs e) =>
+        SaveTime(PerVideo, PerVideoError, AppSettings.MinPerVideoSeconds, AppSettings.MaxPerVideoSeconds, (s, v) => s.SecondsPerVideo = v);
+
+    private void OnStuckChanged(object sender, TextChangedEventArgs e) =>
+        SaveTime(Stuck, StuckError, AppSettings.MinStuckSeconds, AppSettings.MaxStuckSeconds, (s, v) => s.StuckSeconds = v);
+
+    /// <summary>Saves a minutes:seconds time as soon as it's valid; otherwise says what's wrong under the box.</summary>
+    private void SaveTime(TextBox box, TextBlock error, int min, int max, Action<AppSettings, int> set)
     {
-        if (_loading || double.IsNaN(Gap.Value)) return;
-        _host.SaveSettings(s => s.SecondsPerVideo = (int)Math.Clamp(Gap.Value, 20, 600));
+        if (_loading) return;
+        if (TimeText.TryParse(box.Text, out var secs) && secs >= min && secs <= max)
+        {
+            error.Visibility = Visibility.Collapsed;
+            _host.SaveSettings(s => set(s, secs));
+            return;
+        }
+        error.Text = $"Type a time between {TimeText.Format(min)} and {TimeText.Format(max)}, like 1:30.";
+        error.Visibility = Visibility.Visible;
+    }
+
+    private async void OnForget(object sender, RoutedEventArgs e)
+    {
+        var remembered = _host.LogFile.Remembered();
+        if (remembered.Count == 0)
+        {
+            await Ui.Inform(XamlRoot, "Nothing to forget", "The app doesn't remember any clips right now.");
+            return;
+        }
+        var onYouTube = remembered.Count(r => r.Status == LogStatus.Uploaded);
+        var body = $"The app will forget all {Format.Count(remembered.Count, "clip")} it has renamed or uploaded. They will count as new: " +
+                   "they can be renamed again, and night mode will upload them again." +
+                   (onYouTube > 0 ? $"\n\n{onYouTube} of them are already on YouTube. Uploading them again would make duplicates." : "") +
+                   "\n\nNothing is deleted. The log keeps every row, marked Forgotten.";
+        if (!await Ui.Confirm(XamlRoot, "Forget everything?", body, "Forget everything")) return;
+        try
+        {
+            var n = _host.ForgetAll();
+            await Ui.Inform(XamlRoot, "Forgotten", $"{Format.Count(n, "clip")} now count as new.");
+        }
+        catch (LogLockedException ex)
+        {
+            await Ui.Inform(XamlRoot, "Close the log first", ex.Message);
+        }
+        Load();
     }
 
     private async void OnChooseChrome(object sender, RoutedEventArgs e)

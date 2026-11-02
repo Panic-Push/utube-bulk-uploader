@@ -69,6 +69,10 @@ public sealed class StudioDriver
     public TimeSpan StepTimeout { get; init; } = TimeSpan.FromSeconds(45);
     /// <summary>A file not finished uploading after this long is saved anyway and night mode moves on.</summary>
     public TimeSpan UploadCutoff { get; init; } = TimeSpan.FromMinutes(12);
+    /// <summary>An upload whose percentage hasn't moved for this long is treated as stuck: saved anyway, night mode moves on.</summary>
+    public TimeSpan StuckAfter { get; init; } = TimeSpan.FromSeconds(90);
+    /// <summary>How long to watch for Studio's after-save boxes ("Video processing" and the like) to close them.</summary>
+    public TimeSpan AfterSaveWatch { get; init; } = TimeSpan.FromSeconds(15);
     /// <summary>Each video takes at least this long, however fast Studio is.</summary>
     public TimeSpan MinPerVideo { get; init; } = TimeSpan.FromSeconds(45);
     /// <summary>Short pause after each click so Studio can react, as a person would.</summary>
@@ -274,6 +278,7 @@ public sealed class StudioDriver
 
             // 1. Create → Upload videos
             Status?.Invoke($"Opening the upload box for {title}");
+            await CloseNoticesAsync(TimeSpan.Zero, ct);
             if (!await OpenUploadBoxAsync(ct))
                 return await Fail("Couldn't open Studio's upload box (Create → Upload videos).", "upload box not found", handedOver, ct);
 
@@ -344,7 +349,7 @@ public sealed class StudioDriver
             if (upload == UploadState.Unknown && _stopSign is { } stopSign)
                 return new VideoStart(false, stopSign.Message, link, handedOver, stopSign.Outcome, stopSign.ScreenshotPath);
             var cutOff = upload == UploadState.Unknown;
-            string? cutShot = cutOff ? await CaptureAsync("upload cut-off", ct) : null;
+            string? cutShot = cutOff ? await CaptureAsync(uploadNote.StartsWith("stuck") ? "upload stuck" : "upload cut-off", ct) : null;
             var left = MinPerVideo - started.Elapsed;
             if (left > TimeSpan.Zero) { Status?.Invoke($"{title}: uploaded, saving shortly"); await Task.Delay(left, ct); }
 
@@ -361,14 +366,15 @@ public sealed class StudioDriver
                 await Task.Delay(700, ct);
             }
             if (!closed) return await Fail("Studio didn't confirm the save (the details screen stayed open).", "not saved", handedOver, ct);
-            await Task.Delay(1500, ct);
-            await Js("const b = __button(['close-button', 'close-icon-button'], ['close', 'got it']); if (b) b.click(); return true;", ct);
+            await CloseNoticesAsync(AfterSaveWatch, ct);
 
             return upload switch
             {
                 UploadState.Uploaded => new VideoStart(true, "Uploaded and saved as Private.", link, handedOver, Upload: UploadState.Uploaded),
                 UploadState.Failed => new VideoStart(true, $"Studio: {uploadNote}", link, handedOver, Upload: UploadState.Failed),
-                _ => new VideoStart(true, $"Not uploaded after {UploadCutoff.TotalMinutes:0} minutes; saved anyway and moved on.", link, handedOver,
+                _ => new VideoStart(true, uploadNote.StartsWith("stuck")
+                        ? $"Upload {uploadNote} for {Clock(StuckAfter)}; saved anyway and moved on."
+                        : $"Not uploaded after {Clock(UploadCutoff)}; saved anyway and moved on.", link, handedOver,
                     ScreenshotPath: cutShot, Upload: UploadState.Unknown, CutOff: true),
             };
         }
@@ -400,11 +406,21 @@ public sealed class StudioDriver
     {
         _stopSign = null;
         var lastCheck = TimeSpan.Zero;
+        string? lastPercent = null;
+        var lastMove = started.Elapsed;
         for (var first = true; first || started.Elapsed < UploadCutoff; first = false)
         {
             var line = (string?)await Js(ProgressScript, ct) ?? "";
             if (FailLine.IsMatch(line)) return (UploadState.Failed, line.Trim());
             if (DoneLine.IsMatch(line)) return (UploadState.Uploaded, "");
+
+            // Stuck: the percentage hasn't moved for StuckAfter.
+            var pm = Regex.Match(line, @"(\d{1,3})\s?%");
+            var percent = pm.Success ? pm.Groups[1].Value : null;
+            if (percent != lastPercent) { lastPercent = percent; lastMove = started.Elapsed; }
+            else if (started.Elapsed - lastMove >= StuckAfter)
+                return (UploadState.Unknown, percent is null ? "stuck" : $"stuck at {percent}%");
+
             Status?.Invoke($"{title}: {(line.Length > 0 ? line.Trim() : "uploading")} · {(int)started.Elapsed.TotalMinutes} min");
             if (started.Elapsed - lastCheck > TimeSpan.FromSeconds(20))
             {
@@ -415,6 +431,31 @@ public sealed class StudioDriver
         }
         return (UploadState.Unknown, "");
     }
+
+    /// <summary>
+    /// Closes Studio's boxes that pop up after Save ("Video processing", "Video saved", "Still uploading"):
+    /// watches for <paramref name="watch"/>, or checks once when zero. Never touches the upload window itself.
+    /// </summary>
+    private async Task CloseNoticesAsync(TimeSpan watch, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        do
+        {
+            var closed = await JsBool("""
+                if (__dialog()) return false;
+                const all = __all().filter(__vis);
+                const b = all.find(e => e.id === 'close-button' || e.id === 'close-icon-button')
+                    || all.find(e => ['BUTTON','YTCP-BUTTON','TP-YT-PAPER-BUTTON','YTCP-BUTTON-SHAPE'].includes(e.tagName) && /^(close|got it)$/i.test(__txt(e)));
+                if (!b) return false;
+                __clickable(b).click(); return true;
+                """, ct);
+            if (closed) { Status?.Invoke("Closed a Studio notice"); await Task.Delay(800, ct); continue; }
+            if (watch == TimeSpan.Zero) return;
+            await Task.Delay(1000, ct);
+        } while (sw.Elapsed < watch);
+    }
+
+    private static string Clock(TimeSpan t) => $"{(int)t.TotalMinutes}:{t.Seconds:00}";
 
     private async Task<VideoStart> Fail(string message, string shot, bool handedOver, CancellationToken ct) =>
         new(false, message + " Studio may have changed its page; a screenshot and the page's text were saved.", FileHandedOver: handedOver,
@@ -584,7 +625,7 @@ public sealed class NightRunner
 
                 if (v.Saved && v.Upload == UploadState.Uploaded)
                 {
-                    Mark(log, row, LogStatus.Uploaded, $"Uploaded as Private.{link}");
+                    Mark(log, row, LogStatus.Uploaded, $"Uploaded as Private.{link}", v.Link);
                     Uploaded++;
                     cutoffsInARow = 0;
                     sinceRefresh++;
@@ -593,14 +634,14 @@ public sealed class NightRunner
                 else if (v.Saved)
                 {
                     Mark(log, row, LogStatus.Failed, (v.CutOff
-                        ? "Took over the cut-off to upload; saved anyway. Check it on YouTube: if it finished, delete the copy uploaded next run."
-                        : $"{v.Message}. The video was saved, so a broken entry is left on YouTube.") + link);
+                        ? $"{v.Message} Check it on YouTube: if it finished, delete the copy uploaded next run."
+                        : $"{v.Message}. The video was saved, so a broken entry is left on YouTube.") + link, v.Link);
                     Failed++;
                     sinceRefresh++;
                     Activity?.Invoke($"Failed: {row.NewName}. {v.Message}");
                     if (v.CutOff && ++cutoffsInARow >= MaxCutoffsInARow)
                         return new BatchResult(BatchOutcome.TimedOut,
-                            $"{MaxCutoffsInARow} videos in a row didn't finish uploading in time, so night mode stopped for the night. Check the internet connection.",
+                            $"{MaxCutoffsInARow} videos in a row got stuck or didn't finish uploading in time, so night mode stopped for the night. Check the internet connection.",
                             v.ScreenshotPath);
                     if (!v.CutOff) cutoffsInARow = 0;
                 }
@@ -649,8 +690,9 @@ public sealed class NightRunner
         if (changed) log.TrySave();
     }
 
-    private void Mark(LogStore log, LogRow row, string status, string note)
+    private void Mark(LogStore log, LogRow row, string status, string note, string? link = null)
     {
+        if (link is not null) row.YouTubeLink = link;
         row.Status = status;
         row.StatusTime = DateTime.Now;
         row.Note = note;

@@ -12,6 +12,8 @@ public static class LogStatus
     public const string Uploading = "Uploading";
     public const string Failed = "Failed";
     public const string Undone = "Undone";
+    /// <summary>The app was told to forget this clip (Settings > Forget everything): it counts as new again.</summary>
+    public const string Forgotten = "Forgotten";
     public static string InBatch(int n) => $"In batch {n}";
     public static bool IsInBatch(string s) => s.StartsWith("In batch", StringComparison.OrdinalIgnoreCase);
 }
@@ -30,8 +32,20 @@ public sealed class LogRow
     public string Status { get; set; } = "";
     public DateTime StatusTime { get; set; }
     public string Note { get; set; } = "";
+    /// <summary>The video's YouTube link, once night mode has saved it.</summary>
+    public string YouTubeLink { get; set; } = "";
 
     public string CurrentPath => Path.Combine(FolderPath, Status == LogStatus.Undone ? OldName : NewName);
+
+    /// <summary>Video ID from the YouTube link (e.g. "ujumx3_wAKU"), or empty.</summary>
+    public string YouTubeVideoId
+    {
+        get
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(YouTubeLink, @"(?:youtu\.be/|[?&]v=|/shorts/|/video/)([\w-]{4,})");
+            return m.Success ? m.Groups[1].Value : "";
+        }
+    }
 }
 
 public sealed class LogLockedException(string path, Exception inner)
@@ -45,7 +59,8 @@ public sealed class LogLockedException(string path, Exception inner)
 public sealed class LogStore
 {
     public static readonly string[] Header =
-        ["Run ID", "Date/time", "Folder path", "Old name", "New name", "Size (bytes)", "Recording date", "Fingerprint", "Status", "Status time", "Note"];
+        ["Run ID", "Date/time", "Folder path", "Old name", "New name", "Size (bytes)", "Recording date", "Fingerprint", "Status", "Status time", "Note",
+         "Full path", "YouTube link", "YouTube video ID"];
 
     private const string TimeFormat = "yyyy-MM-dd HH:mm:ss";
     private static readonly UTF8Encoding Utf8Bom = new(encoderShouldEmitUTF8Identifier: true);
@@ -115,7 +130,37 @@ public sealed class LogStore
 
     /// <summary>Fingerprints of clips the app has renamed and not undone.</summary>
     public HashSet<string> DoneFingerprints() =>
-        LatestByFingerprint().Values.Where(r => r.Status != LogStatus.Undone).Select(r => r.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        LatestByFingerprint().Values.Where(r => r.Status is not (LogStatus.Undone or LogStatus.Forgotten)).Select(r => r.Fingerprint).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Clips the app currently remembers (renamed, waiting, uploaded or failed).</summary>
+    public List<LogRow> Remembered() =>
+        LatestByFingerprint().Values.Where(r => r.Status is not (LogStatus.Undone or LogStatus.Forgotten)).ToList();
+
+    /// <summary>
+    /// Forgets every clip: each remembered row is marked Forgotten, so the clips count as new again
+    /// (they can be renamed and uploaded again). Nothing is deleted; the history stays in the log.
+    /// Returns how many clips were forgotten. Throws <see cref="LogLockedException"/> if the log is open elsewhere.
+    /// </summary>
+    public int ForgetAll()
+    {
+        var now = DateTime.Now;
+        var rows = Remembered();
+        foreach (var r in rows)
+        {
+            var was = r.Status;
+            r.Status = LogStatus.Forgotten;
+            r.StatusTime = now;
+            r.Note = (r.Note + $" Forgotten (was {was}).").Trim();
+        }
+        // Also any older rows for the same clips, so nothing still counts as done.
+        foreach (var r in Rows.Where(r => r.Status is not (LogStatus.Undone or LogStatus.Forgotten)))
+        {
+            r.Status = LogStatus.Forgotten;
+            r.StatusTime = now;
+        }
+        if (rows.Count > 0) Save();
+        return rows.Count;
+    }
 
     // ---------- CSV ----------
 
@@ -137,6 +182,9 @@ public sealed class LogStore
                 r.Status,
                 r.StatusTime.ToString(TimeFormat, CultureInfo.InvariantCulture),
                 r.Note,
+                r.CurrentPath,
+                r.YouTubeLink,
+                r.YouTubeVideoId,
             ]);
         }
         return sb.ToString();
@@ -163,6 +211,7 @@ public sealed class LogStore
                 Status = Get(8),
                 StatusTime = ParseTime(Get(9)) ?? default,
                 Note = Get(10),
+                YouTubeLink = Get(12),
             });
         }
         return rows;

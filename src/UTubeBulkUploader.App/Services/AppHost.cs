@@ -108,6 +108,16 @@ public sealed class AppHost : ObservableObject
         return Namer.DetectCollisions(Stories, ListFolder);
     }
 
+    /// <summary>Forgets every clip (Settings > Forget everything). Throws LogLockedException if the log is open in Excel.</summary>
+    public int ForgetAll()
+    {
+        var n = LogFile.ForgetAll();
+        Log.Info($"Forget everything: {n} clips");
+        RefreshAlreadyDone();
+        NotifyLogChanged();
+        return n;
+    }
+
     /// <summary>After undo or a log move, clips may no longer (or newly) count as done.</summary>
     private void RefreshAlreadyDone()
     {

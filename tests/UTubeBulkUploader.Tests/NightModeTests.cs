@@ -78,6 +78,36 @@ public class BatchTests
 public class VideoDetailsTests
 {
     [Fact]
+    public void TimesAreTypedAsMinutesAndSeconds()
+    {
+        Assert.True(TimeText.TryParse("0:45", out var a)); Assert.Equal(45, a);
+        Assert.True(TimeText.TryParse("1:30", out var b)); Assert.Equal(90, b);
+        Assert.True(TimeText.TryParse("10:00", out var c)); Assert.Equal(600, c);
+        Assert.True(TimeText.TryParse("1.30", out var d)); Assert.Equal(90, d);
+        Assert.True(TimeText.TryParse("90", out var e)); Assert.Equal(90, e);
+        Assert.False(TimeText.TryParse("1:3", out _));
+        Assert.False(TimeText.TryParse("1:75", out _));
+        Assert.False(TimeText.TryParse("abc", out _));
+        Assert.Equal("1:30", TimeText.Format(90));
+        Assert.Equal("0:45", TimeText.Format(45));
+    }
+
+    [Fact]
+    public void ForgetEverythingMakesClipsNewAgain()
+    {
+        using var t = new TempDir();
+        var log = new LogStore(Path.Combine(t.Root, "log.csv"), t.State);
+        log.Rows.Add(new LogRow { RunId = "r", Fingerprint = "a", Status = LogStatus.Uploaded, YouTubeLink = "https://youtu.be/x1" });
+        log.Rows.Add(new LogRow { RunId = "r", Fingerprint = "b", Status = LogStatus.Renamed });
+        log.Rows.Add(new LogRow { RunId = "r0", Fingerprint = "c", Status = LogStatus.Undone });
+        Assert.Equal(2, log.DoneFingerprints().Count);
+        Assert.Equal(2, log.ForgetAll());
+        Assert.Empty(log.DoneFingerprints());
+        Assert.Equal("https://youtu.be/x1", log.Rows[0].YouTubeLink);   // history kept
+        Assert.Contains("was Uploaded", log.Rows[0].Note);
+    }
+
+    [Fact]
     public void DescriptionHasFileNameAndUploadDate()
     {
         Assert.Equal("File Name: Collector Visit - Phone 1 - 1 (26.10.26), Upload Date: 01.11.26",
@@ -96,7 +126,8 @@ public class NightPracticeTests
         public void Dispose() => Dir.Dispose();
     }
 
-    private static async Task<Outcome?> Run(int clips, string query, int refreshEvery = 20, TimeSpan? cutoff = null, Action<LogStore>? prepare = null)
+    private static async Task<Outcome?> Run(int clips, string query, int refreshEvery = 20, TimeSpan? cutoff = null, Action<LogStore>? prepare = null,
+        TimeSpan? stuckAfter = null)
     {
         var chrome = ChromeLauncher.FindChrome(Environment.GetEnvironmentVariable("UBU_CHROME"));
         if (chrome is null) return null;
@@ -118,7 +149,8 @@ public class NightPracticeTests
         var driver = new StudioDriver(tab, StudioTarget.PracticePage(query))
         {
             ClickPause = TimeSpan.FromMilliseconds(150), StepTimeout = TimeSpan.FromSeconds(10), ScreenshotDir = t.Root,
-            MinPerVideo = TimeSpan.Zero, UploadCutoff = cutoff ?? TimeSpan.FromSeconds(30),
+            MinPerVideo = TimeSpan.Zero, UploadCutoff = cutoff ?? TimeSpan.FromSeconds(30), AfterSaveWatch = TimeSpan.FromSeconds(4),
+            StuckAfter = stuckAfter ?? TimeSpan.FromSeconds(30),
         };
         var lastStatus = "";
         driver.Status += st => lastStatus = st;
@@ -170,8 +202,41 @@ public class NightPracticeTests
         Assert.Equal(2, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
         var cut = Assert.Single(o.Log.Rows, x => x.Status == LogStatus.Failed);
         Assert.Equal("fp2", cut.Fingerprint);
-        Assert.Contains("cut-off", cut.Note);
+        Assert.Contains("Not uploaded after", cut.Note);
         Assert.Equal(3, o.Saved.Count);   // saved anyway
+    }
+
+    [Fact]
+    public async Task AStuckUploadIsGivenUpOnAfterItStopsMoving()
+    {
+        using var o = await Run(2, "speed=1&stuck=1", cutoff: TimeSpan.FromSeconds(60), stuckAfter: TimeSpan.FromSeconds(5));
+        if (o is null) return;
+        Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
+        var stuck = Assert.Single(o.Log.Rows, x => x.Status == LogStatus.Failed);
+        Assert.Contains("stuck at 80%", stuck.Note);
+        Assert.Equal(1, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
+    }
+
+    [Fact]
+    public async Task VideoProcessingBoxesAreClosedSoTheNextVideoStarts()
+    {
+        using var o = await Run(3, "speed=1&processing=2");
+        if (o is null) return;
+        Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
+        Assert.Equal(3, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
+    }
+
+    [Fact]
+    public async Task LinksAreKeptInTheirOwnColumns()
+    {
+        using var o = await Run(1, "speed=1");
+        if (o is null) return;
+        var row = Assert.Single(o.Log.Rows);
+        Assert.Equal("https://youtu.be/TEST1", row.YouTubeLink);
+        Assert.Equal("TEST1", row.YouTubeVideoId);
+        var reread = new LogStore(o.Log.LogPath, o.Dir.State);
+        reread.Load();
+        Assert.Equal("https://youtu.be/TEST1", reread.Rows.Single().YouTubeLink);
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 # UTube Bulk Uploader
 
-A Windows app that renames raw news footage using folder names and shooting dates, groups it into batches of up to 15 for YouTube Studio, and (in a later update) uploads batches overnight.
+A Windows app that renames raw news footage using folder names and shooting dates, then uploads it to YouTube Studio one video at a time overnight (night mode).
 
 ## Install
 
@@ -45,7 +45,7 @@ Every push builds the app on a clean Windows machine, runs the tests, builds the
 ## Roadmap
 
 1. Rename (Home, Preview, rename, undo, log) — done, tested on a real PC
-2. Batches (up to 15 clips, in rename order; drag a card into Studio by hand) — done
+2. Batches — removed (night mode uploads one by one)
 3. Night mode on a test page — runs in the automated tests on every build (not shown in the app)
 4. Night mode on real YouTube Studio — one by one with title, description, audience and Private — **this version, first real test pending**
 5. Second PC check
@@ -62,7 +62,7 @@ and uploads the waiting clips **one by one**, the way a person would: Create →
 
 Night mode stays on the details screen until Studio's progress line says **Upload complete**, then saves, marks the
 clip **Uploaded** in the log (with its YouTube link) and starts the next video: one at a time, at least 45 seconds
-each (Settings). A file still not uploaded after **12 minutes** is saved anyway, marked Failed (with a note to check
+each (Settings). An upload whose percentage doesn't move for **1:30** (Settings) is treated as stuck, and one still not uploaded after **12 minutes** is saved anyway, marked Failed (with a note to check
 it on YouTube) and uploaded again next run; **3 such cut-offs in a row** stop the night. Studio is refreshed every
 20 videos. The Night mode screen counts uploads this run and today.
 
@@ -75,9 +75,17 @@ stops at once.
 If Studio says an upload failed, the video is still saved, so a broken entry is left on YouTube: the log says so
 (with the link) and the clip is uploaded again on the next run.
 
-Testing with the same clips again: the app recognises a clip by its content, not its name, so copies of one video
-count as one clip, and renamed clips stay "already done". Undo the run on the Log page first, or delete the log and
-the `log-backup-*.csv` file in `%LOCALAPPDATA%\UTube Bulk Uploader` for a fresh start.
+After Save, night mode closes Studio's "Video processing" (and similar) boxes so they can't block the next video.
+
+The app recognises a clip by its content, not its name, so copies of one video count as one clip and renamed clips
+stay "already done". To start over, use **Settings → Forget everything**: every clip counts as new again (the log
+keeps the history, marked Forgotten).
+
+### Log columns
+
+Run ID, Date/time, Folder path, Old name, New name, Size (bytes), Recording date, Fingerprint, Status, Status time,
+Note, **Full path** (where the file is now), **YouTube link**, **YouTube video ID**. Status is one of Renamed,
+Uploading, Uploaded, Failed, Undone, Forgotten.
 
 First time: Night mode → **Sign in** → sign in to the channel's Google account in the Chrome window that opens, then close that window. (It opens as ordinary Chrome because Google refuses sign-in in a browser a program controls; night mode reopens it itself.) Try a small batch first.
 

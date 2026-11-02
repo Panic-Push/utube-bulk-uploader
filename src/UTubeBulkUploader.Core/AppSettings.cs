@@ -44,8 +44,13 @@ public sealed class AppSettings
     public string NightStartTime { get; set; } = "23:00";
     public bool NightAutoStart { get; set; }
     public string? ChromePath { get; set; }
-    /// <summary>Night mode starts a new video at most this often.</summary>
+    /// <summary>Night mode spends at least this long on each video.</summary>
     public int SecondsPerVideo { get; set; } = 45;
+    /// <summary>An upload whose percentage hasn't moved for this long is treated as stuck.</summary>
+    public int StuckSeconds { get; set; } = 90;
+
+    public const int MinPerVideoSeconds = 20, MaxPerVideoSeconds = 600;
+    public const int MinStuckSeconds = 30, MaxStuckSeconds = 720;
 
     public string EffectiveLogPath => string.IsNullOrWhiteSpace(LogFilePath) ? AppPaths.DefaultLogPath : LogFilePath!;
 
@@ -73,9 +78,30 @@ public sealed class AppSettings
     {
         BatchSize = Math.Clamp(BatchSize, 1, 15);
         NightlyUploadLimit = Math.Max(1, NightlyUploadLimit);
-        SecondsPerVideo = Math.Clamp(SecondsPerVideo, 20, 600);
+        SecondsPerVideo = Math.Clamp(SecondsPerVideo, MinPerVideoSeconds, MaxPerVideoSeconds);
+        StuckSeconds = Math.Clamp(StuckSeconds, MinStuckSeconds, MaxStuckSeconds);
         var tmp = FilePath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(this, JsonOptions));
         File.Move(tmp, FilePath, overwrite: true);
+    }
+}
+
+/// <summary>Times typed as minutes:seconds, e.g. "0:45", "1:30", "10:00".</summary>
+public static class TimeText
+{
+    public static string Format(int seconds) => $"{seconds / 60}:{seconds % 60:00}";
+
+    /// <summary>Accepts "1:30", "0:45", "10:00", "1.30" and plain seconds like "90".</summary>
+    public static bool TryParse(string text, out int seconds)
+    {
+        seconds = 0;
+        var t = text.Trim().Replace('.', ':');
+        if (t.Length == 0) return false;
+        var parts = t.Split(':');
+        if (parts.Length == 1) return int.TryParse(parts[0], out seconds) && seconds >= 0;
+        if (parts.Length != 2 || parts[1].Length != 2) return false;
+        if (!int.TryParse(parts[0], out var m) || !int.TryParse(parts[1], out var s) || m < 0 || s < 0 || s > 59) return false;
+        seconds = m * 60 + s;
+        return true;
     }
 }
