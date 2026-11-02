@@ -105,6 +105,11 @@ public static class ChromeLauncher
         catch (Exception ex) when (ex is not OperationCanceledException) { /* already closing or gone */ }
     }
 
+    private static void TryKill(Process? p)
+    {
+        try { if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch (Exception) { }
+    }
+
     /// <summary>Returns the control port of the app's Chrome, starting it if needed.</summary>
     public static async Task<int> EnsureRunningAsync(string chromePath, string profileDir, string startUrl, CancellationToken ct)
     {
@@ -124,14 +129,23 @@ public static class ChromeLauncher
             psi.ArgumentList.Add(a);
         foreach (var extra in (Environment.GetEnvironmentVariable("UBU_CHROME_ARGS") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries))
             psi.ArgumentList.Insert(0, extra);   // used by tests (e.g. --headless=new)
-        Process.Start(psi);
+        var proc = Process.Start(psi);
         var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < TimeSpan.FromSeconds(30))
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            if (RunningPort(profileDir) is int port) return port;
-            await Task.Delay(300, ct);
+            while (sw.Elapsed < TimeSpan.FromSeconds(90))   // a slow or busy PC can take a while to start Chrome
+            {
+                ct.ThrowIfCancellationRequested();
+                if (RunningPort(profileDir) is int port) return port;
+                await Task.Delay(300, ct);
+            }
         }
+        catch (OperationCanceledException)
+        {
+            TryKill(proc);
+            throw;
+        }
+        TryKill(proc);   // never leave a half-started Chrome behind
         throw new NightModeException("Chrome didn't start. If a Chrome window from the app is stuck, close it and try again.");
     }
 }

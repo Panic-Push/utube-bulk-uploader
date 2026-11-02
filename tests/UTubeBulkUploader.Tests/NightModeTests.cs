@@ -146,6 +146,7 @@ public class NightPracticeTests
         using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         var port = await ChromeLauncher.EnsureRunningAsync(chrome, Path.Combine(t.Root, "profile"), "about:blank", limit.Token);
         await using var tab = await CdpTab.ConnectAsync(port, limit.Token);
+        try {
         var driver = new StudioDriver(tab, StudioTarget.PracticePage(query))
         {
             ClickPause = TimeSpan.FromMilliseconds(150), StepTimeout = TimeSpan.FromSeconds(10), ScreenshotDir = t.Root,
@@ -160,8 +161,9 @@ public class NightPracticeTests
         if (limit.IsCancellationRequested) result = result with { Message = $"Test ran over 4 minutes. Last status: {lastStatus}" };
         var saved = JsonSerializer.Deserialize<List<Saved>>((string?)await tab.EvalAsync("localStorage.getItem('ubu-saved') || '[]'") ?? "[]")!;
         var loads = (int)double.Parse((string?)await tab.EvalAsync("localStorage.getItem('ubu-loads') || '0'") ?? "0");
-        try { await tab.SendAsync("Browser.close"); } catch (Exception) { }
         return new Outcome(result, log, t, saved, loads);
+        }
+        finally { try { await tab.SendAsync("Browser.close"); } catch (Exception) { } }
     }
 
     [Fact]
