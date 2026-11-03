@@ -60,7 +60,9 @@ public sealed partial class NightPage : Page, IActivatable
         ChromeInfo.Text = chrome is null
             ? "Google Chrome wasn't found. Install Chrome, or set its location in Settings."
             : signingIn ? "Open for signing in. Sign in to the channel's Google account there, then close that Chrome window before starting night mode."
-            : running ? "Night mode's Chrome is open. To sign in or switch account, click Sign in: it reopens Chrome in a normal window."
+            : !string.IsNullOrEmpty(_host.Settings.LastChannelName)
+                ? $"Signed in as {_host.Settings.LastChannelName} (checked at the start of every run). To switch account, click Sign in / switch account."
+            : running ? "Night mode's Chrome is open. To sign in or switch account, click Sign in / switch account: it reopens Chrome in a normal window."
             : "Uses its own Chrome profile, separate from your everyday Chrome. Click Sign in once, sign in to the channel's Google account, then close that window; it stays signed in.";
         OpenChromeButton.IsEnabled = chrome is not null;
     }
@@ -95,6 +97,12 @@ public sealed partial class NightPage : Page, IActivatable
     private void Add(string line) => _host.Ui(() =>
     {
         _activity.Insert(0, $"{DateTime.Now:HH:mm}  {line}");
+        if (line.StartsWith("✓ Signed in as ", StringComparison.Ordinal))
+        {
+            var name = line["✓ Signed in as ".Length..];
+            _host.SaveSettings(s => s.LastChannelName = name);
+            RefreshChrome();
+        }
         while (_activity.Count > 300) _activity.RemoveAt(_activity.Count - 1);
         Log.Info("Night mode: " + line);
     });

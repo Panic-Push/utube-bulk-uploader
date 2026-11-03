@@ -78,6 +78,18 @@ public class BatchTests
 public class VideoDetailsTests
 {
     [Fact]
+    public void StudioWordingForAFinishedUpload()
+    {
+        Assert.True(StudioDriver.IsUploadDone("Checking 12% ... 3 minutes left"));
+        Assert.True(StudioDriver.IsUploadDone("Checking 10%"));
+        Assert.False(StudioDriver.IsUploadDone("Checking 7% ... 5 minutes left"));
+        Assert.True(StudioDriver.IsUploadDone("Processing up to 4K ... 3 minutes left"));
+        Assert.True(StudioDriver.IsUploadDone("Upload complete ... Processing will begin shortly"));
+        Assert.True(StudioDriver.IsUploadDone("Checks complete"));
+        Assert.False(StudioDriver.IsUploadDone("Uploading 45% ... 2 minutes left"));
+    }
+
+    [Fact]
     public void TimesAreTypedAsMinutesAndSeconds()
     {
         Assert.True(TimeText.TryParse("0:45", out var a)); Assert.Equal(45, a);
@@ -226,6 +238,25 @@ public class NightPracticeTests
         if (o is null) return;
         Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
         Assert.Equal(3, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
+    }
+
+    [Fact]
+    public async Task SavedEvenWhenTheUploadBoxStaysBehindVideoProcessing()
+    {
+        using var o = await Run(2, "speed=1&stay=1");
+        if (o is null) return;
+        Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
+        Assert.Equal(2, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
+        Assert.Equal(2, o.Saved.Count);
+    }
+
+    [Fact]
+    public async Task CheckingTenPercentOrMoreCountsAsUploaded()
+    {
+        using var o = await Run(2, "speed=1&checking=1");
+        if (o is null) return;
+        Assert.True(o.Result.Outcome == BatchOutcome.Done, o.Result.Message);
+        Assert.Equal(2, o.Log.Rows.Count(x => x.Status == LogStatus.Uploaded));
     }
 
     [Fact]

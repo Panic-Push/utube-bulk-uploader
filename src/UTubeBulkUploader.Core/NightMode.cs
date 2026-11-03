@@ -81,6 +81,9 @@ public sealed class StudioDriver
 
     public event Action<string>? Status;
 
+    /// <summary>The channel Studio is signed in to, read during the pre-flight check.</summary>
+    public string ChannelName { get; private set; } = "";
+
     private static readonly Regex Limit = new(
         @"daily upload limit|upload limit|reached (the|your) (daily )?limit|limit reached|uploading too many|try again (later|tomorrow)|exceeded the number of videos",
         RegexOptions.IgnoreCase);
@@ -223,7 +226,12 @@ public sealed class StudioDriver
     {
         Status?.Invoke("Checking YouTube Studio");
         if (await GoHomeAsync(ct) is { } stop) return stop;
-        report("✓ Signed in to YouTube Studio");
+        ChannelName = (string?)await Js("""
+            const t = __visibleText(); const m = t.match(/Your channel\s+(.+?)\s+(Dashboard|Content)\b/);
+            if (m) return m[1].trim();
+            const a = __all().find(e => e.id === 'entity-name' && __vis(e)); return a ? __txt(a) : '';
+            """, ct) ?? "";
+        report(ChannelName.Length > 0 ? $"✓ Signed in as {ChannelName}" : "✓ Signed in to YouTube Studio");
 
         var lang = (string?)await Js("return (document.documentElement.lang || '').toLowerCase();", ct) ?? "";
         var english = lang.StartsWith("en") || (lang.Length == 0 && Regex.IsMatch(await VisibleTextAsync(ct), @"\b(Dashboard|Content|Upload)\b"));
@@ -350,23 +358,33 @@ public sealed class StudioDriver
                 return new VideoStart(false, stopSign.Message, link, handedOver, stopSign.Outcome, stopSign.ScreenshotPath);
             var cutOff = upload == UploadState.Unknown;
             string? cutShot = cutOff ? await CaptureAsync(uploadNote.StartsWith("stuck") ? "upload stuck" : "upload cut-off", ct) : null;
-            var left = MinPerVideo - started.Elapsed;
-            if (left > TimeSpan.Zero) { Status?.Invoke($"{title}: uploaded, saving shortly"); await Task.Delay(left, ct); }
-
             // 8. Save, then close any "still uploading" / "video saved" notice
             Status?.Invoke($"{title}: saving");
             if (!await JsBool("const b = __button(['done-button'], ['save', 'publish']); if (!b) return false; b.click(); return true;", ct))
                 return await Fail("Couldn't find the Save button.", "no save button", handedOver, ct);
             await Pause(ct);
-            var closed = false;
+            // Saved when the upload box closes, or when Studio shows its after-save box
+            // ("Video processing", "Video saved", ...) even with the upload box still behind it.
+            var saved = false;
             var sw = Stopwatch.StartNew();
             while (sw.Elapsed < StepTimeout)
             {
-                if (!await JsBool("return !!__dialog();", ct)) { closed = true; break; }
+                if (await JsBool("return !__dialog() || " + SavedNoticeCheck + ";", ct)) { saved = true; break; }
                 await Task.Delay(700, ct);
             }
-            if (!closed) return await Fail("Studio didn't confirm the save (the details screen stayed open).", "not saved", handedOver, ct);
+            if (!saved) return await Fail("Studio didn't confirm the save (the details screen stayed open).", "not saved", handedOver, ct);
+            Status?.Invoke($"{title}: saved");
             await CloseNoticesAsync(AfterSaveWatch, ct);
+
+            // Minimum time per video: wait here, after saving, never on the Save screen.
+            var left = MinPerVideo - started.Elapsed;
+            while (left > TimeSpan.Zero)
+            {
+                Status?.Invoke($"Saved. Next video in {Clock(left)}");
+                var step = left < TimeSpan.FromSeconds(5) ? left : TimeSpan.FromSeconds(5);
+                await Task.Delay(step, ct);
+                left -= step;
+            }
 
             return upload switch
             {
@@ -380,7 +398,8 @@ public sealed class StudioDriver
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return new VideoStart(false, "Stopped.", FileHandedOver: handedOver, Stop: BatchOutcome.Stopped);
+            var shot = _tab.Closed ? null : await CaptureAsync("stopped by user", CancellationToken.None);
+            return new VideoStart(false, "Stopped.", FileHandedOver: handedOver, Stop: BatchOutcome.Stopped, ScreenshotPath: shot);
         }
         catch (NightModeException ex)
         {
@@ -390,16 +409,31 @@ public sealed class StudioDriver
 
     private BatchResult? _stopSign;
 
+    /// <summary>Page check: Studio's after-save box is showing.</summary>
+    private const string SavedNoticeCheck =
+        "/\\b(video processing|video saved|video published|still processing)\\b/i.test(__visibleText())";
+
     // The details screen's own progress line, e.g. "Uploading 45% ... 2 minutes left" then
     // "Upload complete ... Processing will begin shortly" (or "Checks complete", "Processing up to HD").
     private const string ProgressScript = """
         const d = __dialog(); if (!d) return '';
         const text = __ctext(d).replace(/\s+/g, ' ');
-        const m = text.match(/(upload(ing)? complete|upload failed[^.]*|uploading \d{1,3}\s?%[^.]*|\d{1,3}\s?% uploaded|processing (will begin|up to|\d)[^.]*|checks? complete|processing abandoned[^.]*|upload (was )?cancell?ed)/i);
+        const m = text.match(/(upload(ing)? complete|upload failed[^.]*|uploading \d{1,3}\s?%[^.]*|\d{1,3}\s?% uploaded|checking \d{1,3}\s?%[^.]*|processing (will begin|up to|\d)[^.]*|checks? complete|processing abandoned[^.]*|upload (was )?cancell?ed)/i);
         return m ? m[0] : '';
         """;
 
     private static readonly Regex DoneLine = new(@"upload(ing)? complete|100\s?% uploaded|processing (will begin|up to|\d)|checks? complete", RegexOptions.IgnoreCase);
+    /// <summary>
+    /// The file has finished uploading when Studio's line says so, or has moved on to its own work:
+    /// "Checking 10%" or more, or "Processing up to 4K/HD".
+    /// </summary>
+    public static bool IsUploadDone(string line)
+    {
+        if (DoneLine.IsMatch(line)) return true;
+        var m = Regex.Match(line, @"checking (\d{1,3})\s?%", RegexOptions.IgnoreCase);
+        return m.Success && int.Parse(m.Groups[1].Value) >= 10;
+    }
+
     private static readonly Regex FailLine = new(@"fail|abandon|cancell?ed|reject|error", RegexOptions.IgnoreCase);
 
     private async Task<(UploadState, string)> WaitForUploadAsync(string title, Stopwatch started, CancellationToken ct)
@@ -412,7 +446,7 @@ public sealed class StudioDriver
         {
             var line = (string?)await Js(ProgressScript, ct) ?? "";
             if (FailLine.IsMatch(line)) return (UploadState.Failed, line.Trim());
-            if (DoneLine.IsMatch(line)) return (UploadState.Uploaded, "");
+            if (IsUploadDone(line)) return (UploadState.Uploaded, "");
 
             // Stuck: the percentage hasn't moved for StuckAfter.
             var pm = Regex.Match(line, @"(\d{1,3})\s?%");
@@ -442,7 +476,8 @@ public sealed class StudioDriver
         do
         {
             var closed = await JsBool("""
-                if (__dialog()) return false;
+                const noticeUp = /\b(video processing|video saved|video published|still processing)\b/i.test(__visibleText());
+                if (__dialog() && !noticeUp) return false;
                 const all = __all().filter(__vis);
                 const b = all.find(e => e.id === 'close-button' || e.id === 'close-icon-button')
                     || all.find(e => ['BUTTON','YTCP-BUTTON','TP-YT-PAPER-BUTTON','YTCP-BUTTON-SHAPE'].includes(e.tagName) && /^(close|got it)$/i.test(__txt(e)));
@@ -583,6 +618,7 @@ public sealed class NightRunner
     public int Failed { get; private set; }
 
     private volatile bool _finishing;
+    private string _lastLogged = "";
 
     /// <summary>Finish the video in progress, then stop.</summary>
     public void FinishAndStop() => _finishing = true;
@@ -602,7 +638,13 @@ public sealed class NightRunner
         var cutoffsInARow = 0;
         var sinceRefresh = 0;
         LogRow? current = null;
-        driver.Status += s => Report(s, current is null ? 0 : 1, queue.Count);
+        driver.Status += s =>
+        {
+            Report(s, current is null ? 0 : 1, queue.Count);
+            // Write each new step to the technical log (not every percentage or countdown tick).
+            var kind = System.Text.RegularExpressions.Regex.Replace(s, @"\d+", "#");
+            if (kind != _lastLogged) { _lastLogged = kind; Log.Info("Night mode step: " + s); }
+        };
         try
         {
             while (queue.Count > 0)

@@ -30,10 +30,10 @@
   <ytcp-button id="create-icon" role="button">Create</ytcp-button>
 </header>
 <div id="menu"><tp-yt-paper-item id="text-item-0" role="menuitem">Upload videos</tp-yt-paper-item><tp-yt-paper-item role="menuitem">Go live</tp-yt-paper-item></div>
-<main><h1>Channel content</h1><p>Test page. Uploads here are simulated.</p></main>
+<main><p>Your channel <b>Test Channel</b></p><nav>Dashboard Content</nav><h1>Channel content</h1><p>Test page. Uploads here are simulated.</p></main>
 <div class="backdrop" id="backdrop"><ytcp-uploads-dialog id="dialog"></ytcp-uploads-dialog></div>
 <div id="notice"><div><p>Video still uploading. Keep this page open until it's done.</p><ytcp-button id="close-button" role="button">Close</ytcp-button></div></div>
-<div id="processing" class="pdlg"><div><h3>Video processing</h3><p>&nbsp;</p><ytcp-button role="button" class="pclose">Close</ytcp-button></div></div>
+<div id="processing" class="pdlg"><div><h3>Video processing</h3><p>Your private video is still processing standard definition (SD).</p><ytcp-button role="button" class="pclose">Close</ytcp-button></div></div>
 <ytcp-multi-progress-monitor id="monitor"></ytcp-multi-progress-monitor>
 <script>
   // Mirrors YouTube Studio's one-video flow: Create → Upload videos → pick a file → Details (title, description,
@@ -41,13 +41,17 @@
   // ("Uploading 40% ..." → "100% uploaded") after Save; reloading the page loses uploads in progress.
   // Options: ?speed=seconds-per-file  &limit=files-allowed-today  &fail=N (the Nth file's upload fails)
   //          &stuck=all (no upload ever finishes) or &stuck=N (the Nth file never finishes)
+  //          &stay=1 (after Save the upload box stays behind the "Video processing" box, as on the real channel)
+  //          &checking=1 (when the file is up, the line says "Checking 12% ..." instead of "Upload complete")
   //          &processing=S (a "Video processing" box appears S seconds after each Save and blocks the page until closed)
   const q = new URLSearchParams(location.search);
   const speed = Number(q.get('speed') || 3);
   const limit = q.get('limit') ? Number(q.get('limit')) : null;
   const failAt = q.get('fail') ? Number(q.get('fail')) : null;
   const stuckParam = q.get('stuck');
-  const processingAfter = q.get('processing') ? Number(q.get('processing')) : null;
+  const processingAfter = q.get('processing') ? Number(q.get('processing')) : (q.get('stay') === '1' ? 0 : null);
+  const stay = q.get('stay') === '1';
+  const checking = q.get('checking') === '1';
   const blocked = () => document.getElementById('processing').classList.contains('open') || document.getElementById('notice').classList.contains('open');
   const store = {
     get: (k, d) => { try { return JSON.parse(localStorage.getItem('ubu-' + k)) ?? d; } catch { return d; } },
@@ -201,7 +205,8 @@
     }
     show(up) {
       const text = up.failed ? 'Upload failed: Network error' : up.done ? '100% uploaded' : `Uploading ${up.pct}% ...`;
-      if (this.current === up) this.shadowRoot.getElementById('prog').textContent = up.done ? 'Upload complete ... Processing will begin shortly' : text;
+      if (this.current === up) this.shadowRoot.getElementById('prog').textContent =
+        up.done ? (checking ? 'Checking 12% ... 3 minutes left' : 'Upload complete ... Processing will begin shortly') : text;
       if (up.row) { up.row.querySelector('.st').textContent = text; if (up.done) up.row.querySelector('.tick').textContent = '✓'; document.getElementById('monitor').heading(); }
     }
     markDone(up) {
@@ -225,9 +230,15 @@
       store.set('saved', saved);
       up.row = document.getElementById('monitor').add(root.querySelector('#title-textarea #textbox').textContent);
       this.show(up);
-      document.getElementById('backdrop').classList.remove('open');
-      this.current = null;
-      this.reset();
+      if (!stay) {
+        document.getElementById('backdrop').classList.remove('open');
+        this.current = null;
+        this.reset();
+      } else {
+        // Like the real channel: the upload box stays behind until the notice is closed.
+        const closeBoth = () => { document.getElementById('backdrop').classList.remove('open'); this.current = null; this.reset(); };
+        document.querySelector('#processing .pclose').addEventListener('click', closeBoth, { once: true });
+      }
       if (!up.done && !up.failed) document.getElementById('notice').classList.add('open');
       if (processingAfter !== null) setTimeout(() => document.getElementById('processing').classList.add('open'), processingAfter * 1000);
     }

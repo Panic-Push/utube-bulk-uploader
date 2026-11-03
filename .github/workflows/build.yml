@@ -20,6 +20,19 @@ jobs:
 
       - uses: microsoft/setup-msbuild@v2
 
+      - name: Work out the version number
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # VERSION holds major.minor (e.g. 1.1). The first build of a new major.minor is .0, then .1, .2, ...
+        run: |
+          $mm = (Get-Content VERSION -Raw).Trim()
+          $tags = gh release list --limit 200 --json tagName --jq '.[].tagName' 2>$null
+          $patches = @($tags | Where-Object { $_ -like "v$mm.*" } | ForEach-Object { [int]($_.Substring($mm.Length + 2)) })
+          $patch = if ($patches.Count -gt 0) { ($patches | Measure-Object -Maximum).Maximum + 1 } else { 0 }
+          "APP_VERSION=$mm.$patch" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Version $mm.$patch"
+
       - name: Run core tests
         shell: pwsh
         timeout-minutes: 25
@@ -29,7 +42,7 @@ jobs:
         if: success() || failure()     # build even when tests fail, so both sets of problems show up at once
         shell: pwsh
         # Visual Studio's MSBuild: it carries the WinUI resource (PRI) tools that the plain dotnet CLI lacks.
-        run: ./ci/run.ps1 -Title "Build app" -Command "msbuild src/UTubeBulkUploader.App/UTubeBulkUploader.App.csproj -restore -t:Publish -p:Configuration=Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:Version=1.0.${{ github.run_number }} -p:PublishDir=$((Resolve-Path .).Path)\publish\ -nologo -v:minimal"
+        run: ./ci/run.ps1 -Title "Build app" -Command "msbuild src/UTubeBulkUploader.App/UTubeBulkUploader.App.csproj -restore -t:Publish -p:Configuration=Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:Version=${{ env.APP_VERSION }} -p:PublishDir=$((Resolve-Path .).Path)\publish\ -nologo -v:minimal"
 
       - name: Build installer
         shell: pwsh
@@ -38,7 +51,7 @@ jobs:
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y --no-progress
           }
-          ./ci/run.ps1 -Title "Installer" -Command "& '$iscc' /DAppVersion=1.0.${{ github.run_number }} /DSourceDir=..\publish installer\UTubeBulkUploader.iss"
+          ./ci/run.ps1 -Title "Installer" -Command "& '$iscc' /DAppVersion=${{ env.APP_VERSION }} /DSourceDir=..\publish installer\UTubeBulkUploader.iss"
 
 
       - name: Install and open the app (smoke test)
@@ -65,7 +78,7 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UTubeBulkUploader-Setup-1.0.${{ github.run_number }}
+          name: UTubeBulkUploader-Setup-${{ env.APP_VERSION }}
           path: installer/Output/UTubeBulkUploader-Setup.exe
 
       - name: Publish release
@@ -73,7 +86,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v1.0.${{ github.run_number }}"
+          $tag = "v${{ env.APP_VERSION }}"
           gh release create $tag installer/Output/UTubeBulkUploader-Setup.exe `
-            --title "UTube Bulk Uploader 1.0.${{ github.run_number }}" `
+            --title "UTube Bulk Uploader ${{ env.APP_VERSION }}" `
             --notes "Download UTubeBulkUploader-Setup.exe below and run it." --latest

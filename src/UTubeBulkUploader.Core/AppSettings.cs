@@ -48,6 +48,8 @@ public sealed class AppSettings
     public int SecondsPerVideo { get; set; } = 45;
     /// <summary>An upload whose percentage hasn't moved for this long is treated as stuck.</summary>
     public int StuckSeconds { get; set; } = 90;
+    /// <summary>The YouTube channel night mode's Chrome was signed in to at the last check.</summary>
+    public string? LastChannelName { get; set; }
 
     public const int MinPerVideoSeconds = 20, MaxPerVideoSeconds = 600;
     public const int MinStuckSeconds = 30, MaxStuckSeconds = 720;

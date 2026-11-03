@@ -29,7 +29,7 @@
                         <TextBlock x:Name="ChromeInfo" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
-                    <Button Grid.Column="2" x:Name="OpenChromeButton" Content="Sign in" Click="OnOpenChrome" VerticalAlignment="Center" />
+                    <Button Grid.Column="2" x:Name="OpenChromeButton" Content="Sign in / switch account" Click="OnOpenChrome" VerticalAlignment="Center" />
                 </Grid>
             </Border>
 

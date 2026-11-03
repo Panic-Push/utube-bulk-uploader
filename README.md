@@ -60,13 +60,13 @@ and uploads the waiting clips **one by one**, the way a person would: Create →
 - **Audience:** No, it's not made for kids
 - **Visibility:** Private → **Save**
 
-Night mode stays on the details screen until Studio's progress line says **Upload complete**, then saves, marks the
+Night mode stays on the details screen until Studio's progress line says **Upload complete** (or **Checking 10%** or more, or **Processing up to …**), then saves, marks the
 clip **Uploaded** in the log (with its YouTube link) and starts the next video: one at a time, at least 45 seconds
-each (Settings). An upload whose percentage doesn't move for **1:30** (Settings) is treated as stuck, and one still not uploaded after **12 minutes** is saved anyway, marked Failed (with a note to check
+each (Settings; the wait happens after Save, never on the Save screen). An upload whose percentage doesn't move for **1:30** (Settings) is treated as stuck, and one still not uploaded after **12 minutes** is saved anyway, marked Failed (with a note to check
 it on YouTube) and uploaded again next run; **3 such cut-offs in a row** stop the night. Studio is refreshed every
 20 videos. The Night mode screen counts uploads this run and today.
 
-Before the first video it checks that Studio opens signed in and in English, and keeps the PC awake.
+Before the first video it checks that Studio opens signed in (and shows **Signed in as** the channel's name) and in English, and keeps the PC awake. Every step is written to the technical log, and pressing Stop in the middle of a video saves a screenshot and the page's text in **night-screens**.
 
 It stops by itself and says why, with a screenshot and the page's text, when Studio shows a limit message, when Chrome
 is signed out, or when a screen isn't what it expects. **Stop** first finishes the video in progress; **Stop now**
