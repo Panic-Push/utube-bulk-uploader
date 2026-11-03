@@ -392,7 +392,7 @@ public sealed class StudioDriver
                 UploadState.Failed => new VideoStart(true, $"Studio: {uploadNote}", link, handedOver, Upload: UploadState.Failed),
                 _ => new VideoStart(true, uploadNote.StartsWith("stuck")
                         ? $"Upload {uploadNote} for {Clock(StuckAfter)}; saved anyway and moved on."
-                        : $"Not uploaded after {Clock(UploadCutoff)}; saved anyway and moved on.", link, handedOver,
+                        : $"Not uploaded after {Clock(LastCutoff)}; saved anyway and moved on.", link, handedOver,
                     ScreenshotPath: cutShot, Upload: UploadState.Unknown, CutOff: true),
             };
         }
@@ -418,11 +418,40 @@ public sealed class StudioDriver
     private const string ProgressScript = """
         const d = __dialog(); if (!d) return '';
         const text = __ctext(d).replace(/\s+/g, ' ');
-        const m = text.match(/(upload(ing)? complete|upload failed[^.]*|uploading \d{1,3}\s?%[^.]*|\d{1,3}\s?% uploaded|checking \d{1,3}\s?%[^.]*|processing (will begin|up to|\d)[^.]*|checks? complete|processing abandoned[^.]*|upload (was )?cancell?ed)/i);
+        const m = text.match(/(upload(ing)? complete|upload failed[^.]*|uploading \d{1,3}\s?%(?:[ .]*\d+ \w+)*(?: left)?|\d{1,3}\s?% uploaded|checking \d{1,3}\s?%[^.]*|processing (will begin|up to|\d)[^.]*|checks? complete|processing abandoned[^.]*|upload (was )?cancell?ed)/i);
         return m ? m[0] : '';
         """;
 
     private static readonly Regex DoneLine = new(@"upload(ing)? complete|100\s?% uploaded|processing (will begin|up to|\d)|checks? complete", RegexOptions.IgnoreCase);
+    /// <summary>The give-up time used for the last video (dynamic when Studio gave an estimate).</summary>
+    public TimeSpan LastCutoff { get; private set; }
+
+    /// <summary>The longest a single video may be given, whatever Studio estimates.</summary>
+    public TimeSpan MaxCutoff { get; init; } = TimeSpan.FromMinutes(90);
+
+    /// <summary>Elapsed so far + twice Studio's estimate + 2 minutes, between 3 minutes and <see cref="MaxCutoff"/>.</summary>
+    public static TimeSpan DynamicCutoff(TimeSpan elapsed, TimeSpan estimate, TimeSpan max)
+    {
+        var t = elapsed + estimate + estimate + TimeSpan.FromMinutes(2);
+        if (t < TimeSpan.FromMinutes(3)) t = TimeSpan.FromMinutes(3);
+        return t > max ? max : t;
+    }
+
+    /// <summary>Reads "5 minutes left", "1 hour left", "40 seconds left", "2 hours 10 minutes left".</summary>
+    public static TimeSpan? ParseTimeLeft(string line)
+    {
+        var m = Regex.Match(line, @"((?:\d+\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)\s*)+)left", RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        var total = TimeSpan.Zero;
+        foreach (Match p in Regex.Matches(m.Groups[1].Value, @"(\d+)\s*(hours?|hrs?|minutes?|mins?|seconds?|secs?)", RegexOptions.IgnoreCase))
+        {
+            var n = int.Parse(p.Groups[1].Value);
+            var u = p.Groups[2].Value.ToLowerInvariant();
+            total += u.StartsWith('h') ? TimeSpan.FromHours(n) : u.StartsWith('m') ? TimeSpan.FromMinutes(n) : TimeSpan.FromSeconds(n);
+        }
+        return total;
+    }
+
     /// <summary>
     /// The file has finished uploading when Studio's line says so, or has moved on to its own work:
     /// "Checking 10%" or more, or "Processing up to 4K/HD".
@@ -442,9 +471,19 @@ public sealed class StudioDriver
         var lastCheck = TimeSpan.Zero;
         string? lastPercent = null;
         var lastMove = started.Elapsed;
-        for (var first = true; first || started.Elapsed < UploadCutoff; first = false)
+        LastCutoff = UploadCutoff;
+        var estimated = false;
+        for (var first = true; first || started.Elapsed < LastCutoff; first = false)
         {
             var line = (string?)await Js(ProgressScript, ct) ?? "";
+
+            // Give-up time per video: Studio's first "... N minutes left" estimate, doubled, plus 2 minutes.
+            if (!estimated && ParseTimeLeft(line) is { } est)
+            {
+                estimated = true;
+                LastCutoff = DynamicCutoff(started.Elapsed, est, MaxCutoff);
+                Status?.Invoke($"{title}: Studio estimates {Clock(est)} left; giving it up to {Clock(LastCutoff)}");
+            }
             if (FailLine.IsMatch(line)) return (UploadState.Failed, line.Trim());
             if (IsUploadDone(line)) return (UploadState.Uploaded, "");
 

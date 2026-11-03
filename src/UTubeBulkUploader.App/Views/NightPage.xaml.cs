@@ -118,7 +118,7 @@ public sealed partial class NightPage : Page, IActivatable
         if (!await Ui.Confirm(XamlRoot, "Start real uploads?",
                 "Night mode will upload the waiting clips one by one to the YouTube channel signed in to its Chrome window: " +
                 "title from the file name, description with the file name and today's date, not made for kids, Private. " +
-                $"Each video is saved once its upload is complete. An upload that doesn't move for {TimeText.Format(_host.Settings.StuckSeconds)}, or isn't done after 12 minutes, " +
+                $"Each video is saved once its upload is complete. An upload that doesn't move for {TimeText.Format(_host.Settings.StuckSeconds)}, or isn't done by twice Studio's own time estimate plus 2 minutes, " +
                 "is saved anyway and night mode moves on (3 like that in a row stop the night).\n\n" +
                 "Don't use that Chrome window while it runs. Keep this PC awake and connected.", "Start")) return;
 

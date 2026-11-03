@@ -78,6 +78,19 @@ public class BatchTests
 public class VideoDetailsTests
 {
     [Fact]
+    public void GiveUpTimeFollowsStudiosEstimate()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(5), StudioDriver.ParseTimeLeft("Uploading 12% ... 5 minutes left"));
+        Assert.Equal(TimeSpan.FromSeconds(40), StudioDriver.ParseTimeLeft("Uploading 80% ... 40 seconds left"));
+        Assert.Equal(TimeSpan.FromMinutes(130), StudioDriver.ParseTimeLeft("Uploading 1% ... 2 hours 10 minutes left"));
+        Assert.Null(StudioDriver.ParseTimeLeft("Upload complete"));
+        var max = TimeSpan.FromMinutes(90);
+        Assert.Equal(TimeSpan.FromMinutes(12) + TimeSpan.FromSeconds(10), StudioDriver.DynamicCutoff(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), max));
+        Assert.Equal(TimeSpan.FromMinutes(3), StudioDriver.DynamicCutoff(TimeSpan.Zero, TimeSpan.FromSeconds(10), max));
+        Assert.Equal(max, StudioDriver.DynamicCutoff(TimeSpan.Zero, TimeSpan.FromHours(2), max));
+    }
+
+    [Fact]
     public void StudioWordingForAFinishedUpload()
     {
         Assert.True(StudioDriver.IsUploadDone("Checking 12% ... 3 minutes left"));
